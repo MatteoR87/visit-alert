@@ -2,6 +2,15 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["fra1"],
   "functions": {
+    "api/telegram.ts": {
+      "maxDuration": 120
+    },
+    "api/controlla.ts": {
+      "maxDuration": 120
+    },
+    "api/configura.ts": {
+      "maxDuration": 30
+    },
     "api/test-prenota.ts": {
       "maxDuration": 30
     }

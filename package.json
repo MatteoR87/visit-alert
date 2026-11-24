@@ -17,6 +17,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@libsql/client": "^0.18.0"
+    "@libsql/client": "^0.18.0",
+    "@vercel/functions": "^3.11.3"
   }
 }

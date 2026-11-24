@@ -1,0 +1,19 @@
+{
+  "name": "visit-alert",
+  "private": true,
+  "type": "module",
+  "description": "Avvisa su Telegram quando su PrenotaSalute (Regione Lombardia) si libera una data prima dell'appuntamento già prenotato. Funzioni Vercel senza framework.",
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "prova": "node --import tsx scripts/prova-sito.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

@@ -201,6 +201,6 @@ test("/id risponde a tutti; gli altri comandi solo agli abilitati", async () => 
 });
 
 test("soglie del cron: più larghe di notte", () => {
-  assert.deepEqual(sogliaCron(new Date("2026-11-24T02:00:00Z")), { giallo: 45, rosso: 90 }); // 03:00 in Italia
+  assert.deepEqual(sogliaCron(new Date("2026-11-24T02:00:00Z")), { giallo: 75, rosso: 130 }); // 03:00 in Italia
   assert.deepEqual(sogliaCron(new Date("2026-11-24T12:00:00Z")), { giallo: 25, rosso: 60 });
 });

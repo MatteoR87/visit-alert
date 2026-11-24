@@ -135,7 +135,7 @@ async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx:
     anticipate.length > 0
       ? `Ci sono già ${anticipate.length} date libere prima: te le mando qui sotto.`
       : `Per ora nessuna data libera prima della tua.${primaData ? ` La prima libera nella struttura è ${formatoData(primaData.data)}.` : ""}`,
-    "Ricontrollo ogni 15 minuti di giorno (ogni 30 di notte) e ti scrivo solo quando compare una data nuova prima della tua.",
+    "Ricontrollo ogni 15 minuti di giorno (ogni ora di notte) e ti scrivo solo quando compare una data nuova prima della tua.",
   ];
   await ctx.tg.manda(chatId, righe.join("\n"));
   if (anticipate.length > 0)
@@ -144,13 +144,13 @@ async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx:
 
 /**
  * Minuti oltre i quali il cron è in ritardo (🟠) o fermo (🔴). Di giorno (7-24) gira ogni 15 minuti, di notte
- * (0-7) ogni 30: vedi README.
+ * (0-7) ogni 60: vedi README.
  */
 export function sogliaCron(ora = new Date()) {
   const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Rome", hour: "numeric", hourCycle: "h23" }).format(ora));
-  // Fino alle 7:20 vale ancora l'ultimo giro notturno.
+  // Fino alle 7:20 vale ancora l'ultimo giro notturno (alle 6:00, poi il primo del giorno alle 7:00).
   const notte = h < 7 || (h === 7 && Number(ora.toISOString().slice(14, 16)) < 20);
-  return notte ? { giallo: 45, rosso: 90 } : { giallo: 25, rosso: 60 };
+  return notte ? { giallo: 75, rosso: 130 } : { giallo: 25, rosso: 60 };
 }
 
 function quando(iso: string | null) {

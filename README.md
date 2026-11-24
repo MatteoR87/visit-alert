@@ -122,15 +122,15 @@ fa il deploy in produzione da solo.
 5. Su cron-job.org (fuso orario Europe/Rome) due job verso `https://visit-alert.vercel.app/api/controlla`, metodo
    GET, intestazione `Authorization: Bearer <segreto>`, timeout massimo:
    - **giorno**: ogni 15 minuti (minuti 0, 15, 30, 45), ore 7–23;
-   - **notte**: ai minuti 0 e 30, ore 0–6.
+   - **notte**: ogni ora (minuto 0), ore 0–6.
 
    `/api/controlla` risponde subito `202 {"avviato": true}` e fa il giro dopo (`waitUntil`, fino a 120 secondi):
    cron-job.org aspetta al massimo una trentina di secondi. Per vedere il riepilogo di un giro a mano:
    `/api/controlla?chiave=<segreto>&attendi=1`.
 
    Le agende cambiano soprattutto di giorno, quando gli ospedali lavorano e arrivano le disdette; di notte un giro
-   ogni mezz'ora basta e vuol dire meno richieste al sito e ricetta sbloccata più a lungo. `/stato` lo sa: di
-   giorno il cron è in ritardo oltre 25 minuti e fermo oltre 60, di notte (fino alle 7:20) 45 e 90.
+   all'ora basta e vuol dire meno richieste al sito e ricetta sbloccata più a lungo. `/stato` lo sa: di
+   giorno il cron è in ritardo oltre 25 minuti e fermo oltre 60, di notte (fino alle 7:20) 75 e 130.
 
 Prova del sito da Vercel, senza dati personali: `/api/test-prenota?chiave=<segreto>` deve rispondere
 `"ok": true`. `"inCoda": true` vuol dire sala d'attesa attiva (riprovare); un errore in fase `apertura` con

@@ -159,6 +159,24 @@ export class SessionePrenota {
     return out;
   }
 
+  /**
+   * Accesso "con tessera sanitaria" (come il riquadro "Prenota con ricetta" del sito): codice fiscale e ultime
+   * 5 cifre della tessera. Dopo l'accesso il token diventa `token | codice fiscale | cifre`.
+   */
+  async accedi(codiceFiscale: string, cifre: string): Promise<unknown> {
+    if (!this.token) throw new Error("Sessione non aperta");
+    const base = this.token.split(this.separatore)[0];
+    this.token = base;
+    const esito = await this.chiama("pgpcitt_login_gp_prv", {
+      codiceFiscale,
+      crs: cifre,
+      dataScadenza: "",
+      flagIncludiCrsNonAttive: "N",
+    });
+    this.token = [base, codiceFiscale, cifre].join(this.separatore);
+    return esito;
+  }
+
   get haToken() {
     return this.token !== null;
   }

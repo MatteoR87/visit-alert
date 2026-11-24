@@ -29,9 +29,28 @@ l'accesso diventa `token | codice fiscale | ultime 5 cifre della tessera`), `X-P
 Prima del sito c'è la sala d'attesa Queue-it (`attesa.servizirl.it`): con poco traffico rimanda subito indietro
 con i cookie di accesso; se la coda è attiva il giro si salta (`InCoda`).
 
-Servizi utili: `pgpcitt_genera_token`, `pgpcitt_ricerca_parametro`, `pgpcitt_login_gp_prv` (accesso),
-`pgpcitt_ricerca_ricetta`, `pgpcitt_ricerca_appuntamento`, `pgpcitt_ricerca_disponibilita`,
-`pgpcitt_ricerca_ulteriori_disponibilita` (altre date nella stessa struttura).
+### Il giro di controllo (provato il 24/11/2026)
+
+Lo stesso percorso del pulsante "Sposta" del sito, fermandosi prima di scegliere una data:
+
+1. `pgpcitt_genera_token`, `pgpcitt_ricerca_parametro` (versione del sito, separatore del token).
+2. `pgpcitt_login_gp_prv` `{codiceFiscale, crs: ultime 5 cifre, dataScadenza: "", flagIncludiCrsNonAttive: "N"}`.
+3. `pgpcitt_ricerca_ricetta` `{codiceFiscale, nre, iup/iurp/rur: null, periodo: {dal: null, al: null},
+   flagFlussoPostoInCoda: "N", flagIncludiNonPrenotabili: "N", codicePrestazione: "", categoriaPrestazione: ""}`:
+   restituisce la ricetta **e** i suoi appuntamenti (`appuntamenti.singoli[]`: `data` `AAAAMMGGhhmmss`,
+   `unitaErogante.presidio`, `agenda`, `regimeErogazione`). **Blocca la ricetta elettronica**: vedi il passo 6.
+4. `pgpcitt_ricerca_zona` `{}`: la zona della provincia del presidio (`codiceComune: "%"`).
+5. `pgpcitt_ricerca_disponibilita` con `{codiceFiscale, zona, ricetta, tipoPrestazione, presidi: [], aziende: [],
+   recapiti, vincoliTemporali: {dal: AAAAMMGG000000, al, lunedi…domenica/mattina/pomeriggio: "S"}, regimeErogazione, …}`.
+   La ricetta va mandata come la manda il sito: `emessaIl`/`scadenzaIl` come data ISO, `prestazioniPrenotate`
+   (le prestazioni in stato `03`), `appuntamentiUnificati: null`; altrimenti risponde `ES0001`.
+   `tipoPrestazione`: `O` prima visita, `Z` controllo (il sito lo chiede se non lo capisce dalla ricetta).
+   Risposta: `singole[]` con `appuntamento` (data, presidio, agenda), `richiesta`, `migliore`, `primaDataProposta`.
+   Può metterci più di 20 secondi.
+6. `pgpcitt_sblocca_ricetta_elettronica` `{codiceFiscale, nre}`: **sempre**, anche dopo un errore, come fa il sito
+   all'uscita dal flusso.
+
+Mai chiamati: `pgpcitt_conferma_disponibilita`, `pgpcitt_annulla_appuntamento` e simili.
 
 ## Dati sanitari
 

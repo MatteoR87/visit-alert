@@ -78,6 +78,20 @@ test("passa dalla sala d'attesa tenendo i cookie e chiama jsonBroker col token",
   );
 });
 
+test("dopo l'accesso il token diventa token | CF | cifre", async () => {
+  const { f, chiamate } = sitoFinto();
+  const s = new SessionePrenota({ fetch: f });
+  await s.apri();
+  await s.parametri();
+  await s.accedi("RSSMRA80A01F205X", "12345");
+  const login = chiamate.at(-1)!;
+  // Il login parte con il token "nudo".
+  assert.equal(new Headers(login.init.headers).get("x-prenota-online-token"), "tok-123");
+  assert.match(String(login.init.body), /pgpcitt_login_gp_prv/);
+  await s.chiama("pgpcitt_ricerca_ats", {});
+  assert.equal(new Headers(chiamate.at(-1)!.init.headers).get("x-prenota-online-token"), "tok-123 | RSSMRA80A01F205X | 12345");
+});
+
 test("con la coda attiva l'apertura dà InCoda", async () => {
   const { f } = sitoFinto({ coda: true });
   await assert.rejects(new SessionePrenota({ fetch: f }).apri(), InCoda);

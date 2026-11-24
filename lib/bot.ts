@@ -135,7 +135,7 @@ async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx:
     anticipate.length > 0
       ? `Ci sono già ${anticipate.length} date libere prima: te le mando qui sotto.`
       : `Per ora nessuna data libera prima della tua.${primaData ? ` La prima libera nella struttura è ${formatoData(primaData.data)}.` : ""}`,
-    "Ricontrollo ogni 15 minuti e ti scrivo solo quando compare una data nuova prima della tua.",
+    "Ricontrollo ogni 15 minuti di giorno (ogni 30 di notte) e ti scrivo solo quando compare una data nuova prima della tua.",
   ];
   await ctx.tg.manda(chatId, righe.join("\n"));
   if (anticipate.length > 0)

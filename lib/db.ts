@@ -48,6 +48,11 @@ export type ContestoAnticipa = {
   /** Prima data libera nella struttura all'ultimo giro (anche se dopo l'appuntamento). */
   primaData: DataLibera | null;
   proposte?: ProposteSalvate;
+  /**
+   * false: non monitorato (dopo una prenotazione, o per /disdici): il cron non lo ripete e dopo
+   * DURATA_RICERCA_SINGOLA_MS si cancella, finché non si tocca 🔔. Assente (/avvia) vale true.
+   */
+  monitora?: boolean;
 };
 
 /** Ricerca nuova con filtri. */
@@ -68,11 +73,11 @@ export type ContestoCerca = {
   monitora?: boolean;
 };
 
-/** Quanto resta salvata una ricerca senza monitoraggio (per poter prenotare dai suoi pulsanti). */
+/** Quanto resta salvato un controllo o una ricerca senza monitoraggio (per i suoi pulsanti). */
 export const DURATA_RICERCA_SINGOLA_MS = 60 * 60_000;
 
 /** Se il cron deve ripetere questo controllo. */
-export const monitorato = (c: Controllo) => c.modalita !== "cerca" || c.contesto.monitora !== false;
+export const monitorato = (c: Controllo) => c.contesto.monitora !== false;
 
 type Comune = {
   id: number;

@@ -55,21 +55,21 @@ export function tastieraPrenota(id: number, date: DataLibera[]): Tastiera {
 
 /**
  * I pulsanti sotto i risultati di una ricerca: "📅 N" e, se la ricerca non è monitorata, "🔔" per farla
- * ripetere dal cron e "🗑" per chiuderla subito.
+ * ripetere dal cron e "✖️" per chiuderla subito.
  */
 export function tastieraRicerca(id: number, date: DataLibera[], monitora: boolean | undefined): Tastiera {
   const righe = tastieraPrenota(id, date);
   if (monitora === false)
     righe.push([
       { text: "🔔 Avvisami di date migliori", callback_data: `m:${id}` },
-      { text: "🗑 Chiudi", callback_data: `mx:${id}` },
+      { text: "✖️ Chiudi", callback_data: `mx:${id}` },
     ]);
   return righe;
 }
 
 /** Il testo sotto i risultati di una ricerca non monitorata. */
 export const NON_MONITORATA =
-  "ℹ️ Non ripeto questa ricerca. Tocca 🔔 se vuoi che la ricontrolli ogni 15 minuti di giorno (ogni ora di notte) e ti avvisi quando compaiono date migliori. Altrimenti tra un'ora cancello i dati (o subito con 🗑).";
+  "ℹ️ Non ripeto questa ricerca. Tocca 🔔 se vuoi che la ricontrolli ogni 15 minuti di giorno (ogni ora di notte) e ti avvisi quando compaiono date migliori. Altrimenti tra un'ora cancello i dati (o subito con ✖️).";
 
 export function elencoDate(date: DataLibera[], appuntamento: Appuntamento, nuove?: Set<string>): string {
   const righe = date.slice(0, MAX_DATE).map((d, i) => riga(d, i, appuntamento, nuove));
@@ -171,6 +171,7 @@ export const AIUTO = [
   "<code>/stato</code> controlli e ricerche attivi, e l'ultimo giro",
   "<code>/date N</code> controlla adesso e mostra le date",
   "<code>/stop N</code> ferma il controllo o la ricerca N e cancella i suoi dati",
+  "<code>/disdici N</code> o <code>/disdici CODICEFISCALE CIFRE NRE</code> disdice la visita prenotata, dopo la tua conferma",
   "<code>/id</code> il tuo ID Telegram",
   "",
   "Sotto le date ci sono i pulsanti 📅 1, 📅 2…: il bot prenota solo dopo che hai confermato quella data. Se la ricetta è già prenotata, il sito annulla da solo l'appuntamento precedente.",

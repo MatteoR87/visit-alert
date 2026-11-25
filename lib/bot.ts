@@ -25,11 +25,13 @@ import {
 import { controllaUno, salvaProposte, type Contesto as ContestoMonitor } from "./monitor.js";
 import { InCoda } from "./prenota.js";
 import { annullaConferma, chiediConferma, eseguiPrenotazione, type ContestoPrenota } from "./prenota-bot.js";
+import { annullaDisdetta, chiediDisdetta, comandoDisdici, eseguiDisdetta, type ContestoDisdetta } from "./disdetta-bot.js";
 import { html } from "./telegram.js";
 
 export type ContestoBot = ContestoMonitor &
   ContestoCerca &
-  ContestoPrenota & {
+  ContestoPrenota &
+  ContestoDisdetta & {
     db: Client;
     utenti: Set<string>;
   };
@@ -40,6 +42,7 @@ export const COMANDI = [
   { command: "stato", description: "Controlli e ricerche attivi, ultimo giro" },
   { command: "date", description: "Controlla adesso e mostra le date" },
   { command: "stop", description: "Ferma un controllo o una ricerca e cancella i dati" },
+  { command: "disdici", description: "Disdice una visita prenotata (con conferma): /disdici N o CF CIFRE NRE" },
   { command: "aiuto", description: "Come si usa" },
   { command: "id", description: "Il tuo ID Telegram" },
 ];
@@ -67,9 +70,10 @@ export async function gestisciAggiornamento(update: any, ctx: ContestoBot): Prom
   const [primo, ...argomenti] = testo.trim().split(/\s+/);
   const comando = primo.slice(1).split("@")[0].toLowerCase();
 
-  // I messaggi di /avvia e /cerca contengono i dati sanitari: si cancellano prima di tutto, anche se l'utente
-  // non è ammesso.
-  if (comando === "avvia" || comando === "cerca") await ctx.tg.cancella(chatId, msg.message_id);
+  // I messaggi di /avvia, /cerca e /disdici possono contenere i dati sanitari: si cancellano prima di tutto,
+  // anche se l'utente non è ammesso.
+  if (comando === "avvia" || comando === "cerca" || (comando === "disdici" && argomenti.length > 1))
+    await ctx.tg.cancella(chatId, msg.message_id);
 
   if (comando === "id") {
     await ctx.tg.manda(chatId, `Il tuo ID Telegram: <code>${html(utenteId)}</code>\nID di questa chat: <code>${html(chatId)}</code>`);
@@ -97,6 +101,8 @@ export async function gestisciAggiornamento(update: any, ctx: ContestoBot): Prom
       return date(argomenti, chatId, utenteId, ctx);
     case "stop":
       return stop(argomenti, chatId, utenteId, ctx);
+    case "disdici":
+      return comandoDisdici(argomenti, chatId, utenteId, ctx);
     default:
       await ctx.tg.manda(chatId, `Comando sconosciuto. ${AIUTO}`);
   }
@@ -111,6 +117,9 @@ async function pulsante(q: any, ctx: ContestoBot) {
   const dato = String(q.data ?? "");
   if (dato.startsWith("c:")) return gestisciPulsante(q, utenteId, ctx);
   if (dato.startsWith("m:") || dato.startsWith("mx:")) return gestisciMonitoraggio(q, utenteId, ctx);
+  if (dato.startsWith("d:")) return chiediDisdetta(q, utenteId, ctx);
+  if (dato.startsWith("dc:")) return eseguiDisdetta(q, utenteId, ctx);
+  if (dato === "dx") return annullaDisdetta(q, ctx);
   if (dato.startsWith("p:")) return chiediConferma(q, utenteId, ctx);
   if (dato.startsWith("pc:")) return eseguiPrenotazione(q, utenteId, ctx);
   if (dato === "px") return annullaConferma(q, ctx);
@@ -220,13 +229,18 @@ function descriviControllo(c: Controllo): string[] {
     ];
   }
   const a = c.contesto.appuntamento;
+  const scade = new Date(Date.parse(c.creato) + DURATA_RICERCA_SINGOLA_MS).toISOString();
   return [
     `<b>#${c.id}</b> ⏪ Anticipo: ${html(a.prestazione)}`,
     `🏥 ${html(a.presidio.descrizione)}`,
     `📅 Il tuo: ${formatoData(a.data)}`,
-    `🔎 Prima libera nella struttura: ${c.contesto.primaData ? formatoData(c.contesto.primaData.data) : "nessuna"}`,
-    `Date anticipate al momento: ${c.contesto.notificate.length}`,
-    ultimo,
+    ...(c.contesto.monitora === false
+      ? [`⏸ Non monitorato: dati cancellati alle ${quando(scade)} (/disdici ${c.id} per disdire)`]
+      : [
+          `🔎 Prima libera nella struttura: ${c.contesto.primaData ? formatoData(c.contesto.primaData.data) : "nessuna"}`,
+          `Date anticipate al momento: ${c.contesto.notificate.length}`,
+          ultimo,
+        ]),
   ];
 }
 

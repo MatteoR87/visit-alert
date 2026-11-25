@@ -383,7 +383,10 @@ async function avvia(b: Bozza, utenteId: string, chatId: string, ctx: ContestoCe
   );
 }
 
-/** "🔔" (m:<id>): il cron ripete la ricerca da adesso. "🗑" (mx:<id>): la chiude e cancella i dati. */
+/**
+ * "🔔" (m:<id>): il cron ripete la ricerca (o il controllo, dopo una prenotazione) da adesso.
+ * "✖️" (mx:<id>): lo chiude e cancella i dati.
+ */
 export async function gestisciMonitoraggio(q: any, utenteId: string, ctx: ContestoCerca) {
   const [azione, n] = String(q.data ?? "").split(":");
   const chatId = String(q.message?.chat?.id ?? "");
@@ -393,16 +396,17 @@ export async function gestisciMonitoraggio(q: any, utenteId: string, ctx: Contes
   const senzaRiga = ((q.message?.reply_markup?.inline_keyboard ?? []) as Tastiera).filter(
     (riga) => !riga.some((p) => /^mx?:/.test(String(p.callback_data ?? ""))),
   );
-  if (!c || c.modalita !== "cerca") {
-    await ctx.tg.rispondiPulsante(q.id, "Questa ricerca non c'è più: rifalla con /cerca");
+  if (!c) {
+    await ctx.tg.rispondiPulsante(q.id, "Non c'è più (dati già cancellati)");
     await ctx.tg.pulsanti(chatId, messaggio, []);
     return;
   }
+  const cosa = c.modalita === "cerca" ? "Ricerca" : "Controllo";
   if (azione === "mx") {
     await cancellaControllo(ctx.db, c.id);
-    await ctx.tg.rispondiPulsante(q.id, "Ricerca chiusa");
+    await ctx.tg.rispondiPulsante(q.id, "Chiuso");
     await ctx.tg.pulsanti(chatId, messaggio, []);
-    await ctx.tg.manda(chatId, `🗑 Ricerca #${c.id} chiusa. Ho cancellato i suoi dati (codice fiscale, tessera, ricetta).`);
+    await ctx.tg.manda(chatId, `✖️ ${cosa} #${c.id} ${c.modalita === "cerca" ? "chiusa" : "chiuso"}. Ho cancellato i suoi dati (codice fiscale, tessera, ricetta).`);
     return;
   }
   if (c.contesto.monitora === false) {
@@ -418,6 +422,8 @@ export async function gestisciMonitoraggio(q: any, utenteId: string, ctx: Contes
   await ctx.tg.pulsanti(chatId, messaggio, senzaRiga);
   await ctx.tg.manda(
     chatId,
-    `🔔 Ricerca #${c.id}: la ripeto ogni 15 minuti di giorno (ogni ora di notte) e ti avviso quando compaiono date migliori. /stop ${c.id} per fermarla.`,
+    c.modalita === "cerca"
+      ? `🔔 Ricerca #${c.id}: la ripeto ogni 15 minuti di giorno (ogni ora di notte) e ti avviso quando compaiono date migliori. /stop ${c.id} per fermarla.`
+      : `🔔 Controllo #${c.id}: ogni 15 minuti di giorno (ogni ora di notte) guardo se si libera una data prima del ${formatoData(c.contesto.appuntamento.data)}, nella stessa struttura, e ti avviso. /stop ${c.id} per fermarlo.`,
   );
 }

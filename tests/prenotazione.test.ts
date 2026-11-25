@@ -357,27 +357,40 @@ test("📅 chiede conferma con le avvertenze; in prova il pulsante è 🧪 e non
   assert.equal(c.modalita === "anticipa" && c.contesto.appuntamento.data, "20270429083000"); // invariato
 });
 
-test("reale (anticipa): prenota, mostra il nuovo appuntamento e il controllo continua da lì", async () => {
+test("reale (anticipa): prenota, mostra il nuovo appuntamento e chiede se cercarne di migliori (🔔)", async () => {
   const { tg, id, tocca, db } = await ambiente({ reale: true });
   await tocca(`p:${id}:20270410083000:${PRESIDIO.codice}`);
   const conferma = tg.conPulsanti!;
   assert.equal(conferma.tastiera![0][0].text, "✅ Prenota");
   await tocca(conferma.tastiera![0][0].callback_data, conferma.id);
-  const esito = tg.messaggi.find((m) => m.id === conferma.id)!.testo;
-  assert.match(esito, /Prenotato!/);
-  assert.match(esito, /CUP123/);
-  assert.match(esito, /precedente \(gio 29\/04\/2027 08:30\) è stato annullato/);
+  const esito = tg.messaggi.find((m) => m.id === conferma.id)!;
+  assert.match(esito.testo, /Prenotato!/);
+  assert.match(esito.testo, /CUP123/);
+  assert.match(esito.testo, /precedente \(gio 29\/04\/2027 08:30\) è stato annullato/);
+  assert.match(esito.testo, /Tocca 🔔/);
+  // Il vecchio controllo è finito; il nuovo segue il nuovo appuntamento ma NON è monitorato finché non si tocca 🔔.
   const [c] = await leggiControlli(db, CHIAVE);
+  assert.notEqual(c.id, id);
   assert.equal(c.modalita === "anticipa" && c.contesto.appuntamento.data, "20270410083000");
+  assert.equal(c.contesto.monitora, false);
+  assert.deepEqual(esito.tastiera!.flat().map((p) => p.callback_data), [`m:${c.id}`, `d:${c.id}`, `mx:${c.id}`]);
+
+  await tocca(`m:${c.id}`, esito.id);
+  const [dopo] = await leggiControlli(db, CHIAVE);
+  assert.equal(dopo.contesto.monitora, true);
+  assert.match(tg.ultimo, /🔔 Controllo #\d+: .*prima del sab 10\/04\/2027/);
 });
 
-test("reale (cerca): dopo la prenotazione la ricerca finisce", async () => {
+test("reale (cerca): dopo la prenotazione la ricerca finisce; ✖️ chiude anche il nuovo controllo", async () => {
   const { tg, id, tocca, db } = await ambiente({ reale: true, modalita: "cerca" });
   await tocca(`p:${id}:20270410083000:${PRESIDIO.codice}`);
   const conferma = tg.conPulsanti!;
   assert.doesNotMatch(conferma.testo, /annullato automaticamente/); // non c'era un appuntamento
   await tocca(conferma.tastiera![0][0].callback_data, conferma.id);
-  assert.match(tg.messaggi.find((m) => m.id === conferma.id)!.testo, /ricerca #\d+ è finita/);
+  const [c] = await leggiControlli(db, CHIAVE);
+  assert.equal(c.modalita, "anticipa");
+  assert.equal(c.contesto.monitora, false);
+  await tocca(`mx:${c.id}`, conferma.id);
   assert.equal((await leggiControlli(db, CHIAVE)).length, 0);
 });
 

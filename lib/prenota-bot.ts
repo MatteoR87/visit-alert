@@ -1,9 +1,10 @@
 // I pulsanti per prenotare dal bot. Mai in automatico:
 //   "📅 N" (p:<id>:<data>:<presidio>) → riepilogo e avvertenze, con "✅ Prenota" (pc:…) e "❌ No" (px)
-//   "✅ Prenota" → prenotaData (o, in modalità prova, solo la preparazione) → esito.
+//   "✅ Prenota" → prenotaData (o, in modalità prova, solo la preparazione) → esito, con "🔔 Cerca date
+//   migliori" (m:<id>), "🗑 Disdici" (d:<id>) e "✖️ Chiudi" (mx:<id>) per il nuovo appuntamento.
 import type { Client } from "@libsql/client";
 import { chiaveData, type DataLibera } from "./controllo.js";
-import { aggiornaControllo, cancellaControllo, leggiControlli, leggiStato, scriviStato, type Controllo } from "./db.js";
+import { cancellaControllo, leggiControlli, leggiStato, nuovoControllo, scriviStato, type Controllo } from "./db.js";
 import { descriviAppuntamento, formatoData } from "./messaggi.js";
 import { InCoda } from "./prenota.js";
 import { prenotaData, type Bersaglio, type EsitoPrenotazione, type Riserva } from "./prenotazione.js";
@@ -115,7 +116,7 @@ export async function eseguiPrenotazione(q: any, utenteId: string, ctx: Contesto
   // Un solo tentativo alla volta per controllo (doppio tocco, o due conferme aperte).
   const blocco = `prenotazione:${c.id}`;
   const prima = await leggiStato(ctx.db, blocco);
-  if (prima && Date.now() - Date.parse(prima.aggiornato) < DURATA_BLOCCO_MS) {
+  if (prima?.valore?.inCorso && Date.now() - Date.parse(prima.aggiornato) < DURATA_BLOCCO_MS) {
     await ctx.tg.rispondiPulsante(q.id, "Sto già prenotando, attendi");
     return;
   }
@@ -187,16 +188,38 @@ async function dopoLaPrenotazione(
   if (daAnnullare) righe.push("", `L'appuntamento precedente (${formatoData(daAnnullare)}) è stato annullato automaticamente dal sito.`);
   righe.push("Controlla su PrenotaSalute o nell'email di conferma.");
 
-  if (c.modalita === "cerca") {
-    await cancellaControllo(ctx.db, c.id);
-    righe.push("", `La ricerca #${c.id} è finita e ho cancellato i suoi dati. Per anticipare ancora: /avvia.`);
-  } else if (nuovo) {
-    await aggiornaControllo(ctx.db, ctx.chiave, {
-      ...c,
-      ultimoEsito: "prenotato",
-      contesto: { ...c.contesto, appuntamento: nuovo, notificate: [], anticipate: [] },
-    });
-    righe.push("", `Il controllo #${c.id} continua: ti avviso se si libera una data prima di quella nuova. /stop per fermarlo.`);
+  // Il controllo o la ricerca di prima finisce. Al suo posto un controllo del nuovo appuntamento NON
+  // monitorato: il cron lo ripete solo dopo "🔔" (conferma esplicita), altrimenti si cancella dopo un'ora.
+  await cancellaControllo(ctx.db, c.id);
+  if (!nuovo) {
+    righe.push("", `Ho chiuso #${c.id} e cancellato i suoi dati. Per cercare date migliori: /avvia.`);
+    await ctx.tg.modifica(chatId, messaggio, righe.join("\n"));
+    return;
   }
-  await ctx.tg.modifica(chatId, messaggio, righe.join("\n"));
+  const id = await nuovoControllo(ctx.db, ctx.chiave, {
+    modalita: "anticipa",
+    chatId: c.chatId,
+    utenteId: c.utenteId,
+    dati: c.dati,
+    tipo: c.tipo,
+    contesto: {
+      appuntamento: nuovo,
+      zona: c.modalita === "anticipa" ? c.contesto.zona : null,
+      notificate: [],
+      anticipate: [],
+      primaData: null,
+      monitora: false,
+    },
+  });
+  righe.push(
+    "",
+    `Vuoi che controlli se si libera una data <b>prima</b> di questa, nella stessa struttura? Tocca 🔔 (controllo #${id}). Altrimenti tra un'ora cancello i dati (o subito con ✖️ Chiudi).`,
+  );
+  await ctx.tg.modifica(chatId, messaggio, righe.join("\n"), [
+    [{ text: "🔔 Cerca date migliori", callback_data: `m:${id}` }],
+    [
+      { text: "🗑 Disdici", callback_data: `d:${id}` },
+      { text: "✖️ Chiudi", callback_data: `mx:${id}` },
+    ],
+  ]);
 }

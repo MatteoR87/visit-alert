@@ -401,7 +401,7 @@ test("ricerca senza 🔔: il cron non la ripete e dopo un'ora la cancella; con �
   assert.match(tg.ultimo, /Ricerca #3 chiusa/);
   assert.deepEqual((await leggiControlli(db, CHIAVE)).map((c) => c.id), [1]);
   await tocca("m:3", terza);
-  assert.match(tg.risposte.at(-1)!.testo ?? "", /non c'è più/);
+  assert.match(tg.risposte.at(-1)!.testo ?? "", /non c'è più/i);
 });
 
 test("/stato e /stop mostrano anche le ricerche", async () => {

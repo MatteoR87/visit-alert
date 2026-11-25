@@ -6,11 +6,12 @@ Bot Telegram per [PrenotaSalute](https://prenotasalute.regione.lombardia.it/pren
 - **`/cerca`**: cerca una visita nelle zone, nel periodo e nella fascia oraria scelti e mostra le **prime 10
   date**; solo se lo chiedi (🔔) ripete la ricerca e avvisa quando ne compaiono di migliori;
 - **📅 Prenota**: sotto le date, un pulsante per prenotarle, **solo dopo una conferma esplicita** (vedi
-  "Prenotazione").
+  "Prenotazione"); dopo, con **🔔**, il bot cerca date migliori per il nuovo appuntamento;
+- **`/disdici`**: disdice una visita prenotata, **solo dopo una conferma esplicita** (vedi "Disdetta").
 
 Funzioni Vercel senza framework (TypeScript, moduli ESM, regione `fra1`), database Turso, solo chiamate HTTP
-alle API interne del sito: nessun browser. I giri del cron leggono e basta; si prenota solo dal pulsante, dopo la
-conferma, e non si disdice mai (lo spostamento lo gestisce il sito).
+alle API interne del sito: nessun browser. I giri del cron leggono e basta; si prenota e si disdice solo dai
+pulsanti, dopo la conferma (quando si sposta, il vecchio appuntamento lo annulla il sito).
 
 ## Prenotazione
 
@@ -24,8 +25,11 @@ un pulsante **📅 N**:
 2. **✅ Prenota** (entro 10 minuti, un tentativo alla volta per controllo) → in un'unica sessione: accesso,
    ricetta, la stessa ricerca dei giri nelle zone del controllo, la data con lo stesso giorno/ora e presidio
    (e agenda, se ce ne sono più d'una), poi `pgpcitt_conferma_disponibilita`.
-3. Esito: **prenotato** (nuovo appuntamento, codice CUP, importo; un controllo `/avvia` continua confrontando con
-   il nuovo appuntamento, una ricerca `/cerca` finisce), **non più disponibile**, o l'errore del sito.
+3. Esito: **prenotato** (nuovo appuntamento, codice CUP, importo), **non più disponibile**, o l'errore del sito.
+4. Dopo una prenotazione il controllo o la ricerca di prima finisce e al suo posto c'è un controllo del nuovo
+   appuntamento **non monitorato**, con i pulsanti **🔔 Cerca date migliori** (da lì il cron cerca date prima
+   del nuovo appuntamento, nella stessa struttura, come `/avvia`), **🗑 Disdici** e **✖️ Chiudi**. Senza 🔔 il
+   cron non lo ripete e dopo un'ora si cancella.
 
 La richiesta (`ConfermaDisponibilita` del sito, confrontata con una prenotazione fatta dal sito il 25/11/2026):
 `{codiceFiscale, disponibilita: [{selezionabile, appuntamento, prestazioni: [prestazione dell'appuntamento],
@@ -57,6 +61,21 @@ Se la conferma non riceve risposta (rete), non si sblocca e si invita a controll
 **Modalità prova** (default, finché `PRENOTAZIONE_REALE` non è `1`): tutto tranne la conferma; il pulsante è
 🧪 Prova, la risposta dice "Non ho prenotato nulla" e nei log di Vercel va la struttura della richiesta con i
 valori mascherati (`{"prova_prenotazione": …}`: stringhe come `<s:lunghezza>`, salvo date e codici).
+
+## Disdetta
+
+`/disdici N` (l'appuntamento di un controllo), il pulsante **🗑 Disdici** dopo una prenotazione, oppure
+`/disdici CODICEFISCALE CIFRE NRE` (messaggio cancellato subito; i dati si salvano cifrati come controllo non
+monitorato, che si cancella da solo dopo un'ora) → il bot mostra l'appuntamento e le avvertenze (non si torna
+indietro; ticket entro 2 giorni lavorativi) con **🗑 Sì, disdici** (🧪 Prova in modalità prova) e **❌ No**.
+La conferma vale 10 minuti e solo se l'appuntamento del controllo è ancora quello.
+
+Come il sito (AppuntamentoConfermaAnnullaController → AppuntamentoVisualizzaService.annulla): in una sessione
+con la ricetta, l'appuntamento con quella data (attivo e futuro, più quelli associati) dalla ricetta, poi
+`pgpcitt_annulla_appuntamento` con `{codiceFiscale, appuntamenti: [Appuntamento del sito], appuntamentiAnnullati:
+[]}`. Dopo una disdetta riuscita la ricetta non si sblocca (come il sito) e i dati del controllo si cancellano;
+dopo un rifiuto si sblocca (log `disdetta_rifiutata`). Le richieste in lista d'attesa (MOSA) no: dal sito.
+La modalità prova vale anche qui (`prova_disdetta` nei log).
 
 ## Come funziona
 
@@ -124,6 +143,7 @@ al primo `/avvia`. `/avvia … O` o `/avvia … Z` lo forza.
 | `/stato` | stato del cron (🟢/🟠/🔴) e dei propri controlli e ricerche: appuntamento o filtri, prima data, ultimo esito |
 | `/date [N]` | controlla adesso e mostra le date (anticipate, o le prime 10 della ricerca) |
 | `/stop [N]` | ferma il controllo o la ricerca e **cancella** i suoi dati |
+| `/disdici [N]` o `/disdici CODICEFISCALE CIFRE NRE` | disdice la visita prenotata, dopo la conferma (vedi "Disdetta") |
 | `/aiuto` | come si usa |
 | `/id` | il proprio ID Telegram e quello della chat (risponde a tutti) |
 
@@ -183,8 +203,8 @@ Lo stesso percorso del pulsante "Sposta" del sito, fermandosi prima di scegliere
 6. `pgpcitt_sblocca_ricetta_elettronica` `{codiceFiscale, nre}`: **sempre**, anche dopo un errore, come fa il sito
    all'uscita dal flusso.
 
-Mai chiamati dai giri: `pgpcitt_conferma_disponibilita` (solo dal pulsante, vedi "Prenotazione"),
-`pgpcitt_annulla_appuntamento` e simili (mai).
+Mai chiamati dai giri: `pgpcitt_conferma_disponibilita` (solo dal pulsante, vedi "Prenotazione") e
+`pgpcitt_annulla_appuntamento` (solo da `/disdici` dopo la conferma, vedi "Disdetta").
 
 Lo sblocco funziona solo nella stessa sessione della ricerca della ricetta: chiamato da solo il sito risponde
 `ERROR.UNHANDLED` (provato il 25/11/2026).
@@ -201,7 +221,7 @@ Lo sblocco funziona solo nella stessa sessione della ricerca della ricetta: chia
 | `TURSO_AUTH_TOKEN` | token del database, lettura e scrittura |
 | `CHIAVE_CIFRATURA` | 32 byte casuali in base64: cifra i dati nel database |
 | `CRON_SEGRETO` | segreto di `/api/controlla`, `/api/configura` e `/api/test-prenota`: `Authorization: Bearer …` o `?chiave=` |
-| `PRENOTAZIONE_REALE` | facoltativa: `1` perché 📅 → ✅ prenoti davvero; altrimenti modalità prova |
+| `PRENOTAZIONE_REALE` | facoltativa: `1` perché 📅 → ✅ prenoti e `/disdici` disdica davvero; altrimenti modalità prova |
 
 Dopo aver cambiato una variabile serve un **nuovo deploy** (Deployments → ⋯ → Redeploy). Ogni push su `main`
 fa il deploy in produzione da solo.

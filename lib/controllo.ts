@@ -29,14 +29,29 @@ export type EsitoSito = {
   zona: Zona | null;
 };
 
-/** Filtri di una ricerca nuova. Orari in minuti dalla mezzanotte; date AAAAMMGG (incluse). */
+/** Una fascia oraria in minuti dalla mezzanotte, estremi inclusi. */
+export type Fascia = { da: number; a: number };
+
+/** Filtri di una ricerca nuova. Date AAAAMMGG (incluse). */
 export type Filtri = {
   zone: Zona[];
   dal: string | null;
   al: string | null;
-  oraDa: number;
-  oraA: number;
+  /** Le fasce orarie accettate; vuota = tutto il giorno. */
+  fasce?: Fascia[];
+  /** Prima versione (una sola fascia): si legge ancora con fasceDi. */
+  oraDa?: number;
+  oraA?: number;
 };
+
+export const GIORNO_INTERO: Fascia = { da: 0, a: 24 * 60 };
+
+/** Le fasce di un filtro, anche se salvato dalla prima versione; vuota = tutto il giorno. */
+export function fasceDi(f: Filtri): Fascia[] {
+  if (f.fasce) return f.fasce;
+  if (f.oraDa !== undefined && f.oraA !== undefined && !(f.oraDa <= 0 && f.oraA >= 24 * 60)) return [{ da: f.oraDa, a: f.oraA }];
+  return [];
+}
 
 export type Anteprima = {
   prestazione: string;
@@ -390,8 +405,19 @@ export function rispettaFiltri(d: DataLibera, f: Filtri, oggi: string): boolean 
   if (giorno < oggi) return false;
   if (f.dal && giorno < f.dal) return false;
   if (f.al && giorno > f.al) return false;
+  const fasce = fasceDi(f);
+  if (fasce.length === 0) return true;
   const m = minuti(d.data);
-  return m >= f.oraDa && m <= f.oraA;
+  return fasce.some((x) => m >= x.da && m <= x.a);
+}
+
+/** Mattina e/o pomeriggio da chiedere al sito per coprire tutte le fasce. */
+export function fasceSito(fasce: Fascia[]): { mattina: boolean; pomeriggio: boolean } {
+  if (fasce.length === 0) return { mattina: true, pomeriggio: true };
+  return {
+    mattina: fasce.some((x) => x.da < FINE_MATTINA),
+    pomeriggio: fasce.some((x) => x.a > INIZIO_POMERIGGIO),
+  };
 }
 
 export async function cercaNuova(
@@ -408,8 +434,7 @@ export async function cercaNuova(
     const vincoli: Vincoli = {
       dal: filtri.dal && filtri.dal > oggi ? filtri.dal : oggi,
       al: filtri.al,
-      mattina: filtri.oraDa < FINE_MATTINA,
-      pomeriggio: filtri.oraA > INIZIO_POMERIGGIO,
+      ...fasceSito(fasceDi(filtri)),
     };
     const tutte: DataLibera[] = [];
     const zoneInErrore: string[] = [];

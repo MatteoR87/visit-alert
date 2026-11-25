@@ -84,6 +84,30 @@ export function leggiOrario(testo: string): { oraDa: number; oraA: number } | nu
   return { oraDa, oraA };
 }
 
+/** Una o più fasce scritte a mano, separate da virgola, punto e virgola o "e": "8-10, 14:30-16". */
+export function leggiFasce(testo: string): { da: number; a: number }[] | null {
+  const pezzi = testo
+    .split(/\s*(?:,|;|\be\b)\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (pezzi.length === 0) return null;
+  const fasce = [];
+  for (const p of pezzi) {
+    const o = leggiOrario(p);
+    if (!o) return null;
+    fasce.push({ da: o.oraDa, a: o.oraA });
+  }
+  return fasce;
+}
+
+/** Ordina e toglie i doppioni. */
+export function ordinaFasce<T extends { da: number; a: number }>(fasce: T[]): T[] {
+  const viste = new Set<string>();
+  return [...fasce]
+    .sort((x, y) => x.da - y.da || x.a - y.a)
+    .filter((f) => (viste.has(`${f.da}-${f.a}`) ? false : (viste.add(`${f.da}-${f.a}`), true)));
+}
+
 export function formatoOra(minuti: number) {
   return `${due(Math.floor(minuti / 60))}:${due(minuti % 60)}`;
 }

@@ -40,9 +40,12 @@ del sito, poi chiede con i pulsanti:
    è una ricerca sul sito da 5-15 secondi;
 3. **periodo**: da subito, entro 30/60/90 giorni, entro 6 mesi, oppure scritto (`01/12/2026-31/01/2027`,
    `15/1-28/2`, `01/12/2026`);
-4. **fascia oraria**: tutto il giorno, mattina (fino alle 13), pomeriggio (dalle 13), oppure scritta (`8-12`,
-   `14:30-18`). Al sito si chiede mattina e/o pomeriggio (il confine non è documentato, si chiede largo) e
-   l'orario esatto si filtra dopo;
+4. **fasce orarie**, anche più di una (al massimo 8): pulsanti 7–9, 9–11, 11–13, 13–15, 15–17, 17–20 da
+   accendere e spegnere, più quelle scritte a mano (`8-9:30`, o più insieme: `8-10, 14:30-16`), che diventano
+   pulsanti spuntati; poi Avanti. Nessuna fascia = tutto il giorno. Una data va bene se sta in una qualsiasi
+   fascia (estremi inclusi). Al sito si chiede mattina e/o pomeriggio secondo le fasce (il confine non è
+   documentato, si chiede largo) e l'orario esatto si filtra dopo. Le ricerche salvate con la prima versione
+   (una sola fascia `oraDa`/`oraA`) si leggono ancora;
 5. riepilogo e **✅ Avvia**: ricerca in tutte le zone, prime 10 date in ordine e salvataggio come controllo
    in modalità `cerca`.
 

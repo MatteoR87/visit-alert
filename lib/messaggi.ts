@@ -1,5 +1,5 @@
 // Testi dei messaggi del bot (HTML di Telegram).
-import { chiaveData, type Appuntamento, type DataLibera, type Filtri, type Tipo } from "./controllo.js";
+import { chiaveData, fasceDi, type Appuntamento, type DataLibera, type Fascia, type Filtri, type Tipo } from "./controllo.js";
 import { formatoGiorno, formatoOra } from "./dati.js";
 import { html } from "./telegram.js";
 
@@ -66,6 +66,14 @@ export function nomeZona(z: { descrizione?: unknown; codice?: unknown }) {
   return String(z.descrizione ?? z.codice ?? "?");
 }
 
+export function descriviFascia(x: Fascia) {
+  return `${formatoOra(x.da)}–${formatoOra(x.a)}`;
+}
+
+export function descriviFasce(fasce: Fascia[]) {
+  return fasce.map(descriviFascia).join(", ");
+}
+
 export function descriviFiltri(f: Filtri): string {
   const periodo =
     f.dal && f.al
@@ -75,7 +83,8 @@ export function descriviFiltri(f: Filtri): string {
         : f.dal
           ? `dal ${formatoGiorno(f.dal)}`
           : "da subito, senza limite";
-  const orario = f.oraDa === 0 && f.oraA >= 24 * 60 ? "tutto il giorno" : `${formatoOra(f.oraDa)}–${formatoOra(f.oraA)}`;
+  const fasce = fasceDi(f);
+  const orario = fasce.length === 0 ? "tutto il giorno" : descriviFasce(fasce);
   return [
     `📍 Zone: ${f.zone.map((z) => html(nomeZona(z))).join(", ")}`,
     `📆 Periodo: ${periodo}`,

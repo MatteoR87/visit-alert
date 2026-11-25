@@ -10,20 +10,44 @@ import {
   ErroreUtente,
   oggiRoma,
   type DatiRicetta,
+  type Fascia,
   type Filtri,
   type Tipo,
   type Zona,
 } from "./controllo.js";
-import { leggiDatiRicetta, leggiOrario, leggiPeriodo, piuGiorni } from "./dati.js";
+import { leggiDatiRicetta, leggiFasce, leggiPeriodo, ordinaFasce, piuGiorni } from "./dati.js";
 import { cancellaBozza, leggiBozza, nuovoControllo, scriviBozza } from "./db.js";
-import { descriviFiltri, formatoData, formatoTipo, messaggioRisultati, nomeZona, PRIMI_RISULTATI } from "./messaggi.js";
+import {
+  descriviFascia,
+  descriviFasce,
+  descriviFiltri,
+  formatoData,
+  formatoTipo,
+  messaggioRisultati,
+  nomeZona,
+  PRIMI_RISULTATI,
+} from "./messaggi.js";
 import type { AnteprimaSito, CercaSito } from "./monitor.js";
 import { InCoda } from "./prenota.js";
 import { html, type Tastiera, type Telegram } from "./telegram.js";
 
 /** Ogni zona è una ricerca sul sito (5-10 secondi): oltre non si va, per il tempo del giro e per il sito. */
 export const MAX_ZONE = 4;
-const GIORNO_INTERO = { oraDa: 0, oraA: 24 * 60 };
+
+const h = (ore: number) => ore * 60;
+/** Le fasce proposte come pulsanti; altre si scrivono a mano. */
+export const FASCE_PROPOSTE: Fascia[] = [
+  { da: h(7), a: h(9) },
+  { da: h(9), a: h(11) },
+  { da: h(11), a: h(13) },
+  { da: h(13), a: h(15) },
+  { da: h(15), a: h(17) },
+  { da: h(17), a: h(20) },
+];
+/** Oltre diventa illeggibile (e non serve): con più fasce si sceglie quasi tutto il giorno. */
+export const MAX_FASCE = 8;
+
+const stessa = (x: Fascia, y: Fascia) => x.da === y.da && x.a === y.a;
 
 export type ContestoCerca = {
   db: Client;
@@ -48,8 +72,8 @@ export type Bozza = {
   zone: string[];
   dal: string | null;
   al: string | null;
-  oraDa: number;
-  oraA: number;
+  /** Vuota = tutto il giorno. */
+  fasce: Fascia[];
   passo: Passo;
   /** Il messaggio con i pulsanti del passo corrente. */
   messaggio: number;
@@ -69,8 +93,7 @@ function filtriDi(b: Bozza): Filtri {
     zone: b.zone.map((c) => b.zoneDisponibili.find((z) => z.codice === c)).filter((z): z is Zona => !!z),
     dal: b.dal,
     al: b.al,
-    oraDa: b.oraDa,
-    oraA: b.oraA,
+    fasce: ordinaFasce(b.fasce ?? []),
   };
 }
 
@@ -128,18 +151,31 @@ export function schermata(b: Bozza): { testo: string; tastiera: Tastiera } {
           [annulla],
         ],
       };
-    case "orario":
+    case "orario": {
+      const scelte = b.fasce ?? [];
+      const pulsante = (x: Fascia) => ({
+        text: `${scelte.some((y) => stessa(x, y)) ? "✅ " : ""}${descriviFascia(x)}`,
+        callback_data: `c:o:${x.da}-${x.a}`,
+      });
+      // Le proposte, poi le fasce scritte a mano (spuntate: toccandole si tolgono).
+      const pulsanti = [...FASCE_PROPOSTE, ...scelte.filter((x) => !FASCE_PROPOSTE.some((y) => stessa(x, y)))].map(pulsante);
+      const righe: Tastiera = [];
+      for (let i = 0; i < pulsanti.length; i += 3) righe.push(pulsanti.slice(i, i + 3));
+      righe.push([{ text: scelte.length === 0 ? "Tutto il giorno ▶" : `Avanti ▶ (${scelte.length})`, callback_data: "c:o:ok" }]);
+      if (scelte.length > 0) righe.push([{ text: "🔄 Togli tutte", callback_data: "c:o:tutto" }, annulla]);
+      else righe.push([annulla]);
       return {
-        testo: `${intestazione(b)}\n\n🕘 <b>A che ora?</b> Scegli, oppure scrivi una fascia, per esempio <code>8-12</code> o <code>14:30-18</code>.`,
-        tastiera: [
-          [{ text: "Tutto il giorno", callback_data: "c:o:tutto" }],
-          [
-            { text: "Mattina (fino alle 13)", callback_data: "c:o:mattina" },
-            { text: "Pomeriggio (dalle 13)", callback_data: "c:o:pomeriggio" },
-          ],
-          [annulla],
-        ],
+        testo: [
+          intestazione(b),
+          "",
+          "🕘 <b>A che ora?</b> Tocca una o più fasce, oppure scrivine altre, per esempio <code>8-9:30</code> o <code>8-10, 14:30-16</code>. Poi Avanti; senza fasce vale tutto il giorno.",
+          scelte.length > 0 ? `Scelte: ${descriviFasce(ordinaFasce(scelte))}` : "",
+        ]
+          .filter((x) => x !== "")
+          .join("\n"),
+        tastiera: righe,
       };
+    }
     case "conferma":
       return {
         testo: `${intestazione(b)}\n\n${descriviFiltri(filtriDi(b))}\n\nTi mostro le prime ${PRIMI_RISULTATI} date e poi ricontrollo ogni 15 minuti di giorno (ogni ora di notte), avvisandoti quando ne compaiono di migliori.`,
@@ -192,7 +228,7 @@ export async function avviaCerca(argomenti: string[], chatId: string, utenteId: 
     zone: [],
     dal: null,
     al: null,
-    ...GIORNO_INTERO,
+    fasce: [],
     passo: tipo ? "zone" : "tipo",
     messaggio: 0,
   };
@@ -242,13 +278,25 @@ export async function gestisciPulsante(q: any, utenteId: string, ctx: ContestoCe
     b.al = giorni > 0 ? piuGiorni(oggi(ctx), giorni) : null;
     b.passo = "orario";
   } else if (azione === "o" && b.passo === "orario") {
-    const fasce: Record<string, { oraDa: number; oraA: number }> = {
-      tutto: GIORNO_INTERO,
-      mattina: { oraDa: 0, oraA: 13 * 60 },
-      pomeriggio: { oraDa: 13 * 60, oraA: 24 * 60 },
-    };
-    Object.assign(b, fasce[valore] ?? GIORNO_INTERO);
-    b.passo = "conferma";
+    b.fasce ??= [];
+    if (valore === "ok") {
+      b.fasce = ordinaFasce(b.fasce);
+      b.passo = "conferma";
+    } else if (valore === "tutto") {
+      b.fasce = [];
+    } else {
+      const [da, a] = valore.split("-").map(Number);
+      const x = { da, a };
+      if (!Number.isInteger(da) || !Number.isInteger(a) || da >= a) {
+        await ctx.tg.rispondiPulsante(q.id);
+        return;
+      }
+      if (b.fasce.some((y) => stessa(x, y))) b.fasce = b.fasce.filter((y) => !stessa(x, y));
+      else if (b.fasce.length >= MAX_FASCE) {
+        await ctx.tg.rispondiPulsante(q.id, `Al massimo ${MAX_FASCE} fasce`);
+        return;
+      } else b.fasce.push(x);
+    }
   } else if (azione === "ok" && b.passo === "conferma") {
     await ctx.tg.rispondiPulsante(q.id);
     await avvia(b, utenteId, chatId, ctx);
@@ -275,14 +323,18 @@ export async function gestisciTesto(testo: string, chatId: string, utenteId: str
     b.al = p.al;
     b.passo = "orario";
   } else {
-    const o = leggiOrario(testo);
-    if (!o) {
-      await ctx.tg.manda(chatId, "Non ho capito l'orario. Scrivi per esempio <code>8-12</code> o <code>14:30-18</code>.");
+    const nuove = leggiFasce(testo);
+    if (!nuove) {
+      await ctx.tg.manda(chatId, "Non ho capito l'orario. Scrivi per esempio <code>8-12</code>, <code>14:30-18</code> o più fasce: <code>8-10, 14-16</code>.");
       return true;
     }
-    b.oraDa = o.oraDa;
-    b.oraA = o.oraA;
-    b.passo = "conferma";
+    const tutte = ordinaFasce([...(b.fasce ?? []), ...nuove]);
+    if (tutte.length > MAX_FASCE) {
+      await ctx.tg.manda(chatId, `Al massimo ${MAX_FASCE} fasce: toglierne qualcuna toccandola.`);
+      return true;
+    }
+    // Le fasce scritte si aggiungono a quelle scelte: si resta sul passo, per aggiungerne altre o andare avanti.
+    b.fasce = tutte;
   }
   await salvaEMostra(b, utenteId, chatId, ctx, true);
   return true;

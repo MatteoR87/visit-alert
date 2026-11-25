@@ -4,8 +4,17 @@ import { test } from "node:test";
 import { createClient } from "@libsql/client";
 import { gestisciAggiornamento } from "../lib/bot.js";
 import { MAX_ZONE } from "../lib/cerca.js";
-import { cercaNuova, rispettaFiltri, type DataLibera, type EsitoRicerca, type Filtri } from "../lib/controllo.js";
-import { leggiOrario, leggiPeriodo, piuGiorni } from "../lib/dati.js";
+import {
+  cercaNuova,
+  fasceDi,
+  fasceSito,
+  rispettaFiltri,
+  type DataLibera,
+  type EsitoRicerca,
+  type Filtri,
+} from "../lib/controllo.js";
+import { leggiFasce, leggiOrario, leggiPeriodo, piuGiorni } from "../lib/dati.js";
+import { descriviFiltri } from "../lib/messaggi.js";
 import { leggiControlli, preparaDb } from "../lib/db.js";
 import { controllaUno, nuoveDaNotificare, type CercaSito } from "../lib/monitor.js";
 import {
@@ -63,6 +72,38 @@ test("orario scritto a mano", () => {
   assert.equal(leggiOrario("12-8"), null);
   assert.equal(leggiOrario("25-26"), null);
   assert.equal(leggiOrario("mattina"), null);
+});
+
+test("fasce scritte a mano: una o più", () => {
+  assert.deepEqual(leggiFasce("8-10, 14:30-16"), [
+    { da: 480, a: 600 },
+    { da: 870, a: 960 },
+  ]);
+  assert.deepEqual(leggiFasce("8-9 e 18-19; 20-21"), [
+    { da: 480, a: 540 },
+    { da: 1080, a: 1140 },
+    { da: 1200, a: 1260 },
+  ]);
+  assert.equal(leggiFasce("8-10, pomeriggio"), null);
+  assert.equal(leggiFasce(""), null);
+});
+
+test("più fasce: una data vale se sta in una qualsiasi; il sito riceve mattina/pomeriggio giusti", () => {
+  const f: Filtri = { zone: [], dal: null, al: null, fasce: [{ da: 480, a: 600 }, { da: 900, a: 1020 }] };
+  assert.equal(rispettaFiltri(libera("20261201090000"), f, OGGI), true);
+  assert.equal(rispettaFiltri(libera("20261201160000"), f, OGGI), true);
+  assert.equal(rispettaFiltri(libera("20261201120000"), f, OGGI), false);
+  assert.equal(rispettaFiltri(libera("20261201120000"), { ...f, fasce: [] }, OGGI), true);
+  assert.deepEqual(fasceSito([{ da: 480, a: 600 }]), { mattina: true, pomeriggio: false });
+  assert.deepEqual(fasceSito([{ da: 900, a: 1020 }]), { mattina: false, pomeriggio: true });
+  assert.deepEqual(fasceSito(f.fasce!), { mattina: true, pomeriggio: true });
+  assert.deepEqual(fasceSito([]), { mattina: true, pomeriggio: true });
+});
+
+test("ricerche salvate dalla prima versione (oraDa/oraA) si leggono ancora", () => {
+  assert.deepEqual(fasceDi({ zone: [], dal: null, al: null, oraDa: 480, oraA: 720 }), [{ da: 480, a: 720 }]);
+  assert.deepEqual(fasceDi({ zone: [], dal: null, al: null, oraDa: 0, oraA: 1440 }), []);
+  assert.match(descriviFiltri({ zone: [], dal: null, al: null, oraDa: 480, oraA: 720 }), /Orario: 08:00–12:00/);
 });
 
 test("filtri: periodo incluso agli estremi e orario esatto", () => {
@@ -216,10 +257,18 @@ test("/cerca: procedura completa a pulsanti e testo, salvataggio cifrato e prime
   assert.match(tg.ultimo, /Non ho capito il periodo/);
   await scrivi("1/12-31/1");
   assert.match(tg.conPulsanti!.testo, /A che ora/);
-  await scrivi("8:30-12");
+  await scrivi("boh");
+  assert.match(tg.ultimo, /Non ho capito l'orario/);
+  await scrivi("8:30-12, 18-19");
+  assert.match(tg.conPulsanti!.testo, /Scelte: 08:30–12:00, 18:00–19:00/);
+  await tocca("c:o:900-1020"); // 15-17, proposta
+  assert.match(JSON.stringify(tg.conPulsanti!.tastiera), /✅ 15:00–17:00/);
+  assert.match(JSON.stringify(tg.conPulsanti!.tastiera), /✅ 08:30–12:00/); // quella scritta, come pulsante
+  await tocca("c:o:1080-1140"); // toglie 18-19
+  await tocca("c:o:ok");
   assert.match(tg.conPulsanti!.testo, /VARESE, MILANO PROVINCIA/);
   assert.match(tg.conPulsanti!.testo, /dal 01\/12\/2026 al 31\/01\/2027/);
-  assert.match(tg.conPulsanti!.testo, /08:30–12:00/);
+  assert.match(tg.conPulsanti!.testo, /Orario: 08:30–12:00, 15:00–17:00/);
 
   await tocca("c:ok");
   assert.equal(ricerche.length, 1);
@@ -228,7 +277,10 @@ test("/cerca: procedura completa a pulsanti e testo, salvataggio cifrato e prime
     ricerche[0].filtri.zone.map((z) => z.codice),
     ["012%", "015%"],
   );
-  assert.equal(ricerche[0].filtri.oraDa, 510);
+  assert.deepEqual(ricerche[0].filtri.fasce, [
+    { da: 510, a: 720 },
+    { da: 900, a: 1020 },
+  ]);
   assert.match(tg.ultimo, /Ricerca #1/);
   assert.match(tg.ultimo, /Le prime 10 date libere/);
   assert.equal((tg.ultimo.match(/^• /gm) ?? []).length, 10);
@@ -248,12 +300,15 @@ test("/cerca: tipo dalla ricetta salta la domanda; periodo e orario a pulsanti; 
   await tocca("c:z:012%");
   await tocca("c:z:ok");
   await tocca("c:d:30");
-  await tocca("c:o:pomeriggio");
+  await tocca("c:o:420-540");
+  await tocca("c:o:tutto"); // toglie tutto
+  assert.doesNotMatch(JSON.stringify(tg.conPulsanti!.tastiera), /✅/);
+  await tocca("c:o:ok"); // senza fasce: tutto il giorno
   assert.match(tg.conPulsanti!.testo, /fino al 24\/12\/2026/);
-  assert.match(tg.conPulsanti!.testo, /13:00–24:00/);
+  assert.match(tg.conPulsanti!.testo, /Orario: tutto il giorno/);
   await tocca("c:ok");
   assert.equal(ricerche[0].filtri.al, "20261224");
-  assert.equal(ricerche[0].filtri.oraDa, 13 * 60);
+  assert.deepEqual(ricerche[0].filtri.fasce, []);
 });
 
 test(`/cerca: al massimo ${MAX_ZONE} zone; pulsanti vecchi o annullati non fanno nulla`, async () => {
@@ -279,7 +334,7 @@ test("giro della ricerca: avvisa per una data migliore, tace per una peggiore, s
   await tocca("c:z:012%");
   await tocca("c:z:ok");
   await tocca("c:d:0");
-  await tocca("c:o:tutto");
+  await tocca("c:o:ok");
   await tocca("c:ok");
   const n = tg.messaggi.length;
 
@@ -314,7 +369,7 @@ test("/stato e /stop mostrano anche le ricerche", async () => {
   await tocca("c:z:012%");
   await tocca("c:z:ok");
   await tocca("c:d:0");
-  await tocca("c:o:tutto");
+  await tocca("c:o:ok");
   await tocca("c:ok");
   await scrivi("/stato");
   assert.match(tg.ultimo, /<b>#1<\/b> 🔎 Ricerca: VISITA CARDIOLOGICA/);

@@ -59,17 +59,19 @@ test("prova: prepara la richiesta come il sito e non la invia; la ricetta si sbl
   assert.equal(q.disponibilita[0].appuntamento.data, "20270410083000");
   const ar = q.disponibilita[0].appuntamento.ricetta;
   assert.equal(ar.iup, "IUP1");
-  assert.equal(ar.iurp, null);
+  assert.equal(ar.iurp ?? null, null); // assente nel grezzo: fuori dal JSON, come nel sito
   assert.deepEqual(ar.modulo, { id: NRE, tipo: null });
   assert.deepEqual(ar.prestazioni, []);
   assert.deepEqual(ar.appuntamentiUnificati, []);
   // Solo i campi del modello Appuntamento del sito, gli assenti a null.
   const ap = q.disponibilita[0].appuntamento;
-  assert.equal(ap.ipCup, null);
+  assert.equal(ap.ipCup ?? null, null);
   assert.deepEqual(ap.cicli, []);
   assert.equal(Object.keys(ap).length, 37);
   // Come la richiesta del sito: prestazioni della disponibilità piene, cittadino e info* oggetti.
-  assert.deepEqual(q.disponibilita[0].prestazioni, [{ descrizione: "ECO" }]);
+  assert.equal(q.disponibilita[0].prestazioni.length, 1);
+  assert.equal(q.disponibilita[0].prestazioni[0].descrizione, "ECO");
+  assert.equal(q.disponibilita[0].prestazioni[0], ap.prestazione);
   assert.equal(ap.cittadino.codiceFiscale, null);
   assert.deepEqual(ap.infoMezzi, { testo: null, link: null });
   assert.equal(q.ricetta.emessaIl, "20261118");
@@ -188,6 +190,87 @@ test("il giro salva (cifrate) le proposte delle prime date, con l'ora", async ()
   const s = salvaProposte(p, una)!;
   assert.ok(Date.now() - Date.parse(s.quando) < 5000);
   assert.equal((s.singole as any)[`20270410083000|${PRESIDIO.codice}|${AGENDA.codice}`].richiesta, "R1");
+});
+
+test("conferma: oggetti come i modelli del sito (forma di una conferma riuscita dal sito)", async () => {
+  const { richiestaConferma } = await import("../lib/prenotazione.js");
+  // Disponibilità grezza come la restituisce la ricerca (valori finti), con i campi che il sito scarta o trasforma.
+  const grezza = {
+    appuntamento: {
+      uuid: "U1",
+      data: "20270211110500",
+      prestazione: { codice: "P1", descrizione: "VISITA", id: null, descrizioneBreve: null, flagExAsl: "N" },
+      azienda: { codice: "A1", descrizione: "AZ", id: null, flag: null, infoPrenotazione: null },
+      unitaErogante: {
+        dataRiferimento: null,
+        idAppuntamento: null,
+        codice: "DER",
+        puntoIndirizzo: null,
+        unitaPrenotante: { codice: "430", azienda: null, flag: { inibizioneNre: "N", cupUnico: "S" } },
+        presidio: {
+          codice: "002202",
+          id: "1",
+          puntoIndirizzo: {
+            localita: { codice: "018177", descrizione: "X", cap: "1", siglaProvincia: "PV" },
+            indirizzo: { toponimo: null, descrizione: "VIA", civico: "1", frazione: null, x: "8.86", y: "45.30" },
+          },
+          azienda: { codice: "A1", flag: { prioritaB: "N", listaAttesa: null }, infoPrenotazione: { telefono: null, orari: [] } },
+        },
+      },
+      agenda: { codice: "AG", descrizione: "D", note: "n" },
+      infoLuogoPresentazione: { testo: "Piano", link: null },
+      quesitoDiagnostico: { codice: "Q", descrizione: "D", id: "x", operatoreLogico: null },
+      regimeErogazione: "1",
+      risorsa: { codice: "R", nome: "N", cognome: "C" },
+      tariffaLp: "0,00",
+    },
+    richiesta: "123",
+    primaDataProposta: "20270211110500",
+  };
+  const ricetta = {
+    data: "20261125000000",
+    iup: "IUP",
+    cittadino: { codiceFiscale: CF },
+    emessaIl: "20261125",
+    modulo: { id: NRE, tipo: "09" },
+    stato: { codice: "01", descrizione: "PRESCRITTO", data: null },
+    quesitoDiagnostico: { codice: null, descrizione: "q", id: null, operatoreLogico: null },
+    prestazioni: [{ codice: "P1", stato: { codice: "01" }, distretti: null, metodiche: null }],
+    appuntamenti: { singoli: [] },
+  };
+  const q: any = JSON.parse(
+    JSON.stringify(
+      richiestaConferma({ codiceFiscale: CF, zona: ZONA, ricetta, tipo: "Z", recapiti: { telefono: null, email: null }, singola: grezza }),
+    ),
+  );
+  const d = q.disponibilita[0];
+  const a = d.appuntamento;
+  const ue = a.unitaErogante;
+  assert.deepEqual(ue.presidio.puntoIndirizzo.indirizzo, {
+    toponimo: null,
+    descrizione: "VIA",
+    civico: "1",
+    frazione: null,
+    coordinate: { latitude: "45.30", longitude: "8.86" },
+  });
+  assert.deepEqual(ue.puntoIndirizzo, { localita: null, indirizzo: null });
+  assert.equal(ue.presidio.distanza, null);
+  assert.ok(!("dataRiferimento" in ue) && !("idAppuntamento" in ue));
+  assert.deepEqual(ue.unitaPrenotante.flag, { inibizioneNre: "N" });
+  assert.deepEqual(ue.unitaPrenotante.azienda, { id: null, codice: null, descrizione: null, area: null, email: null, sito: null, flag: null, infoPrenotazione: null });
+  assert.deepEqual(a.azienda.infoPrenotazione, { telefono: null, orari: null });
+  assert.ok(!("id" in a.prestazione) && !("descrizioneBreve" in a.prestazione));
+  assert.deepEqual(a.quesitoDiagnostico, { codice: "Q", descrizione: "D" });
+  assert.deepEqual(a.infoLuogoPresentazione, { testo: "Piano", link: null });
+  assert.deepEqual(a.risorsa, { codice: "R", nome: "N", cognome: "C", agende: [], descrizione: "N C" });
+  assert.deepEqual(d.prestazioni, [a.prestazione]);
+  assert.ok(!("data" in q.ricetta));
+  assert.deepEqual(q.ricetta.quesitoDiagnostico, { codice: null, descrizione: "q" });
+  assert.deepEqual(q.ricetta.prestazioni[0].agende, []);
+  assert.ok(!("distretti" in q.ricetta.prestazioni[0]));
+  assert.equal(q.ricetta.appuntamenti, null);
+  assert.equal(q.ricetta.appuntamentiUnificati, null);
+  assert.equal(q.zona.codice, "012%");
 });
 
 test("log della prova: valori mascherati salvo codici e date", () => {

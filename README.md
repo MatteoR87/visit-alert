@@ -30,12 +30,13 @@ un pulsante **📅 N**:
 La richiesta (`ConfermaDisponibilita` del sito, confrontata con una prenotazione fatta dal sito il 25/11/2026):
 `{codiceFiscale, disponibilita: [{selezionabile, appuntamento, prestazioni: [prestazione dell'appuntamento],
 richiesta, primaDataProposta}], appuntamenti: [], zona, ricetta (come nella ricerca, con appuntamenti: null),
-tipoPrestazione, recapiti}`. `prestazioni` va riempita (il sito lo fa nella finestra di verifica): con `null` il
-sito risponde `ERROR.UNHANDLED`. `appuntamento` è quello della disponibilità ridotto ai campi del modello
-Appuntamento del sito (gli assenti a `null`, `cicli` lista, `cittadino` e `info*` oggetti con i campi a `null`)
-con `ricetta` = una Ricetta vuota con `iup`, `iurp` e `modulo: {id, tipo}` (Appuntamento.newFrom /
-Ricetta.newFromAppuntamento). `richiesta` è il codice che lega la data alla ricerca appena fatta: per questo si
-rifà la ricerca.
+tipoPrestazione, recapiti}`. Gli oggetti si costruiscono come i modelli AngularJS del sito
+([lib/modelli-sito.ts](lib/modelli-sito.ts): Disponibilita, Appuntamento, Ue, Presidio, PuntoIndirizzo,
+Indirizzo con `coordinate {latitude, longitude}` da `x`/`y`, Azienda, Risorsa, Ricetta, Zona…), non si
+rimandano quelli grezzi della ricerca: con quelli grezzi il sito risponde `ERROR.UNHANDLED` (due prove reali il
+25/11/2026). `prestazioni` contiene la prestazione dell'appuntamento (il sito la mette nella finestra di
+verifica); `appuntamento.ricetta` è una Ricetta vuota con `iup`, `iurp` e `modulo: {id, tipo}`. `richiesta` è il
+codice che lega la data alla ricerca appena fatta: per questo si rifà la ricerca.
 
 Se il sito rifiuta la conferma, nei log di Vercel va `{"conferma_rifiutata": {codice, dettaglio, trattenuta,
 richiesta}}`: il testo dell'eccezione del sito ripulito (email, codici e numeri lunghi sostituiti) e la

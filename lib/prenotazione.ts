@@ -15,12 +15,12 @@ import {
   criteriDisponibilita,
   oggiRoma,
   recapiti,
-  ricettaPerDisponibilita,
   type Appuntamento,
   type DatiRicetta,
   type Tipo,
   type Zona,
 } from "./controllo.js";
+import * as sito from "./modelli-sito.js";
 import { ErrorePrenota, type OpzioniSessione } from "./prenota.js";
 
 /** La data da prenotare: giorno e ora (AAAAMMGGhhmmss) e presidio; l'agenda, se c'è, decide tra omonime. */
@@ -40,53 +40,6 @@ export const DURATA_PROPOSTA_MS = 20 * 60_000;
 
 export type OpzioniPrenotazione = OpzioniSessione & { reale: boolean; ora?: Date; riserva?: Riserva | null };
 
-/** I campi del modello Appuntamento del sito (gpmodel), nell'ordine del sito. */
-const CAMPI_APPUNTAMENTO = [
-  "uuid", "idAppuntamento", "iup", "iurp", "modulo", "associazione", "ipCup", "cup", "data", "cittadino",
-  "prenotatoIl", "registratoIl", "modificatoIl", "annullatoIl", "noteAnnullamento", "stato", "tipo",
-  "prestazione", "azienda", "unitaErogante", "unitaErogatrice", "agenda", "infoNote", "infoNotePreparazione",
-  "infoLuogoPresentazione", "infoMemorandum", "infoNoteDisdettaPrenotazione", "infoConsensoInformato",
-  "infoMezzi", "cicli", "quesitoDiagnostico", "differita", "ricetta", "regimeErogazione", "risorsa",
-  "tariffaLp", "importo",
-] as const;
-
-/** Ricetta.newFromAppuntamento del sito: una Ricetta vuota con iup, iurp e modulo {id, tipo}. */
-function ricettaDaAppuntamento(a: any) {
-  return {
-    iup: a?.iup ?? null, iurp: a?.iurp ?? null, cittadino: null, emessaIl: null, scadenzaIl: null, tipo: null,
-    modulo: { id: a?.modulo ?? null, tipo: null }, flagRe: null, priorita: null, urgenza: null,
-    tipoPrestazione: null, stato: null, quesitoDiagnostico: null, note: null, esenzione: null,
-    flagEsenzionePatologia: null, flagAltreEsenzioni: null, flagSuggerita: null, brancaSpecialistica: null,
-    provenienzaPrescrizione: null, prescrittore: null, nrPrestazioni: null, prestazioni: [],
-    prestazioniPrenotate: [], datiRispostaMEF: null, appuntamenti: null, appuntamentiUnificati: [],
-    daSbloccare: false,
-  };
-}
-
-/**
- * L'appuntamento della disponibilità come lo manda il sito (Appuntamento.newFrom): solo i campi del modello
- * (gli assenti a null), le date restano stringhe, `cicli` è una lista e `ricetta` è una Ricetta vuota con i codici.
- */
-function appuntamentoPerConferma(a: any) {
-  const fuori: Record<string, unknown> = {};
-  for (const k of CAMPI_APPUNTAMENTO) fuori[k] = a?.[k] ?? null;
-  fuori.cicli = Array.isArray(a?.cicli) ? a.cicli : [];
-  fuori.ricetta = ricettaDaAppuntamento(a);
-  // Come i modelli del sito (AppuntamentoCittadino, InfoLink): oggetti con i campi a null, mai null.
-  fuori.cittadino = a?.cittadino ?? CITTADINO_VUOTO;
-  for (const k of CAMPI_INFO) fuori[k] = a?.[k] ?? { testo: null, link: null };
-  return fuori;
-}
-
-const CITTADINO_VUOTO = {
-  codiceFiscale: null, codiceSanitario: null, nome: null, cognome: null, sesso: null, nascita: null,
-  localita: null, residenza: null, indirizzo: null, tel: null, sms: null, email: null,
-};
-const CAMPI_INFO = [
-  "infoNote", "infoNotePreparazione", "infoLuogoPresentazione", "infoMemorandum",
-  "infoNoteDisdettaPrenotazione", "infoConsensoInformato", "infoMezzi",
-] as const;
-
 /** Il ConfermaDisponibilita del sito, per una disponibilità singola. */
 export function richiestaConferma(p: {
   codiceFiscale: string;
@@ -98,22 +51,13 @@ export function richiestaConferma(p: {
 }) {
   return {
     codiceFiscale: p.codiceFiscale,
-    disponibilita: [
-      {
-        selezionabile: true,
-        appuntamento: appuntamentoPerConferma(p.singola.appuntamento),
-        // Il sito la riempie (Disponibilita.getPrestazioni) nella finestra di verifica, prima della conferma:
-        // con null il sito risponde ERROR.UNHANDLED (prima prova reale, 25/11/2026; richiesta del sito
-        // confrontata il 25/11/2026).
-        prestazioni: p.singola.appuntamento?.prestazione ? [p.singola.appuntamento.prestazione] : [],
-        richiesta: p.singola.richiesta ?? null,
-        primaDataProposta: p.singola.primaDataProposta ?? null,
-      },
-    ],
+    // Disponibilita/Appuntamento/Ue/Presidio… come li costruiscono i modelli del sito (vedi modelli-sito.ts).
+    // Con l'oggetto grezzo della ricerca il sito risponde ERROR.UNHANDLED (prove reali del 25/11/2026).
+    disponibilita: [sito.disponibilita(p.singola)],
     // Il sito qui mette solo gli appuntamenti "differiti" da annullare (non gestiti online da questo servizio).
     appuntamenti: [],
-    zona: p.zona,
-    ricetta: { ...ricettaPerDisponibilita(p.ricetta), appuntamenti: null, appuntamentiUnificati: null },
+    zona: sito.zona(p.zona),
+    ricetta: sito.ricettaPerConferma(p.ricetta),
     tipoPrestazione: p.tipo,
     recapiti: { telefono: p.recapiti.telefono, cellulare: null, email: p.recapiti.email },
   };

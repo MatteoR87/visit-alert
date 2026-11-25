@@ -26,9 +26,24 @@ export class ErrorePrenota extends Error {
   constructor(
     readonly destinazione: string,
     readonly codice: string,
+    /** Il testo dell'eccezione del sito, ripulito da possibili dati personali (vedi `ripulisci`). */
+    readonly dettaglio: string | null = null,
   ) {
     super(`${destinazione}: ${codice}`);
   }
+}
+
+/**
+ * Un testo del sito da poter mettere nei log: niente email, codici fiscali, codici lunghi o numeri di 5+ cifre
+ * (NRE, tessera, telefoni), al massimo 300 caratteri.
+ */
+export function ripulisci(testo: unknown): string | null {
+  if (testo == null || testo === "") return null;
+  return String(testo)
+    .replace(/\S+@\S+/g, "<email>")
+    .replace(/\b[A-Za-z0-9]{11,}\b/g, (x) => (/\d/.test(x) && /[A-Za-z]/.test(x) ? "<codice>" : /^\d+$/.test(x) ? "<numero>" : x))
+    .replace(/\d{5,}/g, "<numero>")
+    .slice(0, 300);
 }
 
 type Cookie = { dominio: string; valore: string };
@@ -138,7 +153,8 @@ export class SessionePrenota {
     if (r.status >= 300 && r.status < 400) throw new InCoda();
     if (!r.ok) throw new Error(`${destinazione}: HTTP ${r.status}`);
     const j: any = await r.json();
-    if (j.exception) throw new ErrorePrenota(destinazione, String(j.exception.code ?? "ERRORE"));
+    if (j.exception)
+      throw new ErrorePrenota(destinazione, String(j.exception.code ?? "ERRORE"), ripulisci(j.exception.message));
     if (typeof j.result === "string") {
       try {
         return JSON.parse(j.result) as T;

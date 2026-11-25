@@ -57,7 +57,17 @@ test("prova: prepara la richiesta come il sito e non la invia; la ricetta si sbl
   assert.equal(q.disponibilita[0].richiesta, "R1");
   assert.equal(q.disponibilita[0].selezionabile, true);
   assert.equal(q.disponibilita[0].appuntamento.data, "20270410083000");
-  assert.deepEqual(q.disponibilita[0].appuntamento.ricetta, { iup: "IUP1", iurp: null, modulo: { id: NRE } });
+  const ar = q.disponibilita[0].appuntamento.ricetta;
+  assert.equal(ar.iup, "IUP1");
+  assert.equal(ar.iurp, null);
+  assert.deepEqual(ar.modulo, { id: NRE, tipo: null });
+  assert.deepEqual(ar.prestazioni, []);
+  assert.deepEqual(ar.appuntamentiUnificati, []);
+  // Solo i campi del modello Appuntamento del sito, gli assenti a null.
+  const ap = q.disponibilita[0].appuntamento;
+  assert.equal(ap.ipCup, null);
+  assert.deepEqual(ap.cicli, []);
+  assert.equal(Object.keys(ap).length, 37);
   assert.equal(q.ricetta.emessaIl, "20261118");
   assert.equal(q.ricetta.appuntamenti, null);
   assert.equal(q.ricetta.prestazioniPrenotate.length, 1);
@@ -93,8 +103,27 @@ test("data non più libera: nessuna conferma, ricetta sbloccata", async () => {
 
 test("conferma rifiutata dal sito: errore e ricetta sbloccata", async () => {
   const { f, chiamate } = sito({ pgpcitt_conferma_disponibilita: () => ({ eccezione: "DISPONIBILITA.OCCUPATA" }) });
-  await assert.rejects(prenotaData(dati, "O", [ZONA], BERSAGLIO, { fetch: f, reale: true }), /rifiutato.*DISPONIBILITA\.OCCUPATA/);
+  const err = console.error;
+  const righe: string[] = [];
+  console.error = (x: unknown) => void righe.push(String(x));
+  try {
+    await assert.rejects(prenotaData(dati, "O", [ZONA], BERSAGLIO, { fetch: f, reale: true }), /rifiutato.*DISPONIBILITA\.OCCUPATA/);
+  } finally {
+    console.error = err;
+  }
   assert.equal(chiamate.at(-1)!.destinazione, "pgpcitt_sblocca_ricetta_elettronica");
+  const log = righe.find((r) => r.includes("conferma_rifiutata"))!;
+  assert.ok(log);
+  assert.ok(!log.includes(CF) && !log.includes(NRE)); // nessun dato personale nei log
+});
+
+test("ripulisci: il testo del sito senza dati personali", async () => {
+  const { ripulisci } = await import("../lib/prenota.js");
+  assert.equal(ripulisci(null), null);
+  assert.equal(
+    ripulisci(`NullPointerException per ${CF} ricetta ${NRE} tel 3331234567 a@b.it`),
+    "NullPointerException per <codice> ricetta <codice> tel <numero> <email>",
+  );
 });
 
 test("conferma senza risposta (rete): errore che invita a controllare, e niente sblocco", async () => {

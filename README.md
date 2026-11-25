@@ -29,9 +29,15 @@ un pulsante **📅 N**:
 
 La richiesta (`ConfermaDisponibilita` del sito): `{codiceFiscale, disponibilita: [{selezionabile, appuntamento,
 prestazioni: null, richiesta, primaDataProposta}], appuntamenti: [], zona, ricetta (come nella ricerca, con
-appuntamenti: null), tipoPrestazione, recapiti}`; `appuntamento` è quello della disponibilità con `cicli`,
-`differita` e `ricetta: {iup, iurp, modulo: {id}}` (Appuntamento.newFrom). `richiesta` è il codice che lega la
-data alla ricerca appena fatta: per questo si rifà la ricerca.
+appuntamenti: null), tipoPrestazione, recapiti}`; `appuntamento` è quello della disponibilità ridotto ai campi
+del modello Appuntamento del sito (gli assenti a `null`, `cicli` lista) con `ricetta` = una Ricetta vuota con
+`iup`, `iurp` e `modulo: {id, tipo}` (Appuntamento.newFrom / Ricetta.newFromAppuntamento). `richiesta` è il
+codice che lega la data alla ricerca appena fatta: per questo si rifà la ricerca.
+
+Se il sito rifiuta la conferma, nei log di Vercel va `{"conferma_rifiutata": {codice, dettaglio, trattenuta,
+richiesta}}`: il testo dell'eccezione del sito ripulito (email, codici e numeri lunghi sostituiti) e la
+struttura mascherata della richiesta. Il primo tentativo reale (25/11/2026) è stato rifiutato con
+`ERROR.UNHANDLED`, prima di queste correzioni.
 
 **Date trattenute.** Ogni ricerca di disponibilità trattiene per qualche minuto (più di 5, al massimo circa 15:
 prova del 25/11/2026 con ricerche a 0 s, 22 s, 5 e 10 minuti) la **prima** data che propone: una ricerca subito

@@ -40,14 +40,39 @@ export const DURATA_PROPOSTA_MS = 20 * 60_000;
 
 export type OpzioniPrenotazione = OpzioniSessione & { reale: boolean; ora?: Date; riserva?: Riserva | null };
 
-/** L'appuntamento della disponibilità come lo manda il sito (Appuntamento.newFrom): le date restano stringhe. */
-function appuntamentoPerConferma(a: any) {
+/** I campi del modello Appuntamento del sito (gpmodel), nell'ordine del sito. */
+const CAMPI_APPUNTAMENTO = [
+  "uuid", "idAppuntamento", "iup", "iurp", "modulo", "associazione", "ipCup", "cup", "data", "cittadino",
+  "prenotatoIl", "registratoIl", "modificatoIl", "annullatoIl", "noteAnnullamento", "stato", "tipo",
+  "prestazione", "azienda", "unitaErogante", "unitaErogatrice", "agenda", "infoNote", "infoNotePreparazione",
+  "infoLuogoPresentazione", "infoMemorandum", "infoNoteDisdettaPrenotazione", "infoConsensoInformato",
+  "infoMezzi", "cicli", "quesitoDiagnostico", "differita", "ricetta", "regimeErogazione", "risorsa",
+  "tariffaLp", "importo",
+] as const;
+
+/** Ricetta.newFromAppuntamento del sito: una Ricetta vuota con iup, iurp e modulo {id, tipo}. */
+function ricettaDaAppuntamento(a: any) {
   return {
-    ...a,
-    cicli: a?.cicli ?? [],
-    differita: a?.differita ?? null,
-    ricetta: { iup: a?.iup ?? null, iurp: a?.iurp ?? null, modulo: { id: a?.modulo ?? null } },
+    iup: a?.iup ?? null, iurp: a?.iurp ?? null, cittadino: null, emessaIl: null, scadenzaIl: null, tipo: null,
+    modulo: { id: a?.modulo ?? null, tipo: null }, flagRe: null, priorita: null, urgenza: null,
+    tipoPrestazione: null, stato: null, quesitoDiagnostico: null, note: null, esenzione: null,
+    flagEsenzionePatologia: null, flagAltreEsenzioni: null, flagSuggerita: null, brancaSpecialistica: null,
+    provenienzaPrescrizione: null, prescrittore: null, nrPrestazioni: null, prestazioni: [],
+    prestazioniPrenotate: [], datiRispostaMEF: null, appuntamenti: null, appuntamentiUnificati: [],
+    daSbloccare: false,
   };
+}
+
+/**
+ * L'appuntamento della disponibilità come lo manda il sito (Appuntamento.newFrom): solo i campi del modello
+ * (gli assenti a null), le date restano stringhe, `cicli` è una lista e `ricetta` è una Ricetta vuota con i codici.
+ */
+function appuntamentoPerConferma(a: any) {
+  const fuori: Record<string, unknown> = {};
+  for (const k of CAMPI_APPUNTAMENTO) fuori[k] = a?.[k] ?? null;
+  fuori.cicli = Array.isArray(a?.cicli) ? a.cicli : [];
+  fuori.ricetta = ricettaDaAppuntamento(a);
+  return fuori;
 }
 
 /** Il ConfermaDisponibilita del sito, per una disponibilità singola. */
@@ -144,8 +169,16 @@ export async function prenotaData(
       try {
         esito = await s.chiama("pgpcitt_conferma_disponibilita", richiesta);
       } catch (e) {
-        // Rifiutata dal sito: nulla è cambiato, la ricetta si sblocca come sempre.
-        if (e instanceof ErrorePrenota) throw new Error(`Il sito ha rifiutato la prenotazione (${e.codice})`);
+        // Rifiutata dal sito: nulla è cambiato, la ricetta si sblocca come sempre. Nei log il testo del sito
+        // (ripulito) e la struttura mascherata della richiesta, per capire il rifiuto.
+        if (e instanceof ErrorePrenota) {
+          console.error(
+            JSON.stringify({
+              conferma_rifiutata: { codice: e.codice, dettaglio: e.dettaglio, trattenuta, richiesta: strutturaMascherata(richiesta) },
+            }),
+          );
+          throw new Error(`Il sito ha rifiutato la prenotazione (${e.codice})`);
+        }
         // Errore di rete: la prenotazione potrebbe essere andata a buon fine. Meglio non sbloccare la ricetta.
         sess.prenotata = true;
         throw new Error(

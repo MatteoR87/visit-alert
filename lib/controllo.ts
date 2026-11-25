@@ -1,6 +1,9 @@
-// Un giro sul sito: accesso, ricetta con il suo appuntamento, disponibilità nella zona del presidio, sblocco.
-// Solo lettura: è il percorso del pulsante "Sposta" fermandosi prima di scegliere una data (vedi README).
-import { ErrorePrenota, SessionePrenota, type OpzioniSessione } from "./prenota.js";
+// I giri sul sito, solo in lettura (vedi README):
+// - giroSito: la ricetta già prenotata, il suo appuntamento e le date nella zona del presidio (per anticipare);
+// - anteprimaRicetta: la ricetta e le zone, per preparare una ricerca nuova;
+// - cercaNuova: le date nelle zone scelte, con periodo e orario.
+// Dopo la ricerca della ricetta, che la blocca, si chiama sempre lo sblocco, come fa il sito.
+import { ErrorePrenota, InCoda, SessionePrenota, type OpzioniSessione } from "./prenota.js";
 
 /** O prima visita, Z controllo, U urgente: come li manda il sito. */
 export type Tipo = "O" | "Z" | "U";
@@ -15,7 +18,8 @@ export type Appuntamento = {
   unita: string | null;
 };
 export type DataLibera = { data: string; presidio: Luogo; agenda: Luogo; unita: string | null };
-export type Zona = Record<string, unknown>;
+/** Una zona del sito (provincia, o Milano città), come la restituisce pgpcitt_ricerca_zona più `codice`. */
+export type Zona = Record<string, unknown> & { codice?: string; descrizione?: string };
 export type EsitoSito = {
   /** null se la ricetta non ha (più) un appuntamento futuro. */
   appuntamento: Appuntamento | null;
@@ -23,6 +27,33 @@ export type EsitoSito = {
   date: DataLibera[];
   tipo: Tipo;
   zona: Zona | null;
+};
+
+/** Filtri di una ricerca nuova. Orari in minuti dalla mezzanotte; date AAAAMMGG (incluse). */
+export type Filtri = {
+  zone: Zona[];
+  dal: string | null;
+  al: string | null;
+  oraDa: number;
+  oraA: number;
+};
+
+export type Anteprima = {
+  prestazione: string;
+  /** Il tipo dedotto dalla ricetta come fa il sito; null se il sito lo chiederebbe. */
+  tipo: Tipo | null;
+  /** L'appuntamento futuro, se la ricetta è già prenotata. */
+  appuntamento: Appuntamento | null;
+  zone: Zona[];
+};
+
+export type EsitoRicerca = {
+  /** L'appuntamento futuro della ricetta, se è prenotata. */
+  appuntamento: Appuntamento | null;
+  /** Le date che rispettano i filtri, in ordine, da tutte le zone. */
+  date: DataLibera[];
+  /** Zone in cui la ricerca è fallita (le altre valgono comunque). */
+  zoneInErrore: string[];
 };
 
 /** Errore da far vedere all'utente così com'è (dati sbagliati, ricetta non trovata…). */
@@ -45,32 +76,29 @@ export type OpzioniGiro = OpzioniSessione & {
 
 const ROMA = "Europe/Rome";
 
-/** Data di oggi in Italia come AAAAMMGG. */
-export function oggiRoma(ora = new Date()): string {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone: ROMA, year: "numeric", month: "2-digit", day: "2-digit" })
+function parti(ora: Date, conOra: boolean) {
+  return Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: ROMA,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      ...(conOra ? { hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" } : {}),
+    })
       .formatToParts(ora)
       .map((x) => [x.type, x.value]),
   );
+}
+
+/** Data di oggi in Italia come AAAAMMGG. */
+export function oggiRoma(ora = new Date()): string {
+  const p = parti(ora, false);
   return `${p.year}${p.month}${p.day}`;
 }
 
 /** Adesso in Italia come AAAAMMGGhhmmss, confrontabile con le date del sito. */
 export function adessoRoma(ora = new Date()): string {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: ROMA,
-      hourCycle: "h23",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    })
-      .formatToParts(ora)
-      .map((x) => [x.type, x.value]),
-  );
+  const p = parti(ora, true);
   return `${p.year}${p.month}${p.day}${p.hour}${p.minute}${p.second}`;
 }
 
@@ -119,7 +147,9 @@ function ricettaPerDisponibilita(ricetta: any) {
   };
 }
 
-const SI = "S";
+type Vincoli = { dal: string; al: string | null; mattina: boolean; pomeriggio: boolean };
+
+const sn = (b: boolean) => (b ? "S" : "N");
 function criteriDisponibilita(p: {
   codiceFiscale: string;
   zona: Zona;
@@ -127,7 +157,7 @@ function criteriDisponibilita(p: {
   tipo: Tipo;
   regimeErogazione: string | null;
   recapiti: { telefono: string | null; email: string | null };
-  oggi: string;
+  vincoli: Vincoli;
 }) {
   return {
     codiceFiscale: p.codiceFiscale,
@@ -138,17 +168,17 @@ function criteriDisponibilita(p: {
     aziende: [],
     recapiti: { telefono: p.recapiti.telefono, cellulare: null, email: p.recapiti.email },
     vincoliTemporali: {
-      dal: `${p.oggi}000000`,
-      al: null,
-      lunedi: SI,
-      martedi: SI,
-      mercoledi: SI,
-      giovedi: SI,
-      venerdi: SI,
-      sabato: SI,
-      domenica: SI,
-      mattina: SI,
-      pomeriggio: SI,
+      dal: `${p.vincoli.dal}000000`,
+      al: p.vincoli.al ? `${p.vincoli.al}235959` : null,
+      lunedi: "S",
+      martedi: "S",
+      mercoledi: "S",
+      giovedi: "S",
+      venerdi: "S",
+      sabato: "S",
+      domenica: "S",
+      mattina: sn(p.vincoli.mattina),
+      pomeriggio: sn(p.vincoli.pomeriggio),
     },
     caricaRequestRicercaAgende: "N",
     minDal: null,
@@ -227,9 +257,16 @@ export function tipoDaRicetta(ricetta: any): Tipo | null {
   return null;
 }
 
-// ---- il giro -------------------------------------------------------------------------------------
+function prestazioneDi(ricetta: any): string {
+  return (ricetta?.prestazioni ?? []).map((p: any) => String(p?.descrizione ?? "")).filter(Boolean).join(" + ");
+}
 
-export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promise<EsitoSito> {
+// ---- sessione con la ricetta ---------------------------------------------------------------------
+
+type Sessione = { s: SessionePrenota; login: any; ricetta: any };
+
+/** Accesso e ricetta; `lavoro` gira con la ricetta bloccata, che poi si sblocca sempre. */
+async function conRicetta<T>(dati: DatiRicetta, opz: OpzioniSessione, lavoro: (x: Sessione) => Promise<T>): Promise<T> {
   const s = new SessionePrenota({ timeoutMs: 40_000, ...opz });
   await s.apri();
   await s.parametri();
@@ -241,8 +278,6 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
       throw new ErroreUtente(`Accesso rifiutato dal sito (${e.codice}): controlla codice fiscale e cifre della tessera`);
     throw e;
   }
-
-  // Da qui la ricetta elettronica può risultare bloccata: si sblocca sempre, come fa il sito.
   try {
     let rr: any;
     try {
@@ -253,13 +288,40 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
     }
     const ricetta = rr?.ricette?.[0];
     if (!ricetta) throw new ErroreUtente(MESSAGGI["RICETTA.RICERCA.KO"]);
+    return await lavoro({ s, login, ricetta });
+  } finally {
+    await s
+      .chiama("pgpcitt_sblocca_ricetta_elettronica", { codiceFiscale: dati.codiceFiscale, nre: dati.nre })
+      .catch((e) => console.warn(JSON.stringify({ sblocco: (e as Error).message.slice(0, 120) })));
+  }
+}
 
+function recapiti(login: any) {
+  const c = login?.cittadino ?? {};
+  return { telefono: c.telefono ?? null, email: c.email ?? null };
+}
+
+async function zoneDelSito(s: SessionePrenota): Promise<Zona[]> {
+  const zone = await s.chiama<any[]>("pgpcitt_ricerca_zona", {});
+  return (zone ?? []).map((z) => ({ ...z, codice: `${z.codiceProvincia}${z.codiceComune}` }));
+}
+
+async function trovaZona(s: SessionePrenota, appuntamento: any): Promise<Zona> {
+  const provincia = String(appuntamento?.unitaErogante?.presidio?.puntoIndirizzo?.localita?.codice ?? "").slice(0, 3);
+  const z = (await zoneDelSito(s)).find((x) => x.codiceProvincia === provincia && x.codiceComune === "%");
+  if (!z) throw new Error(`Zona della provincia ${provincia || "?"} non trovata`);
+  return z;
+}
+
+// ---- anticipare un appuntamento ------------------------------------------------------------------
+
+export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promise<EsitoSito> {
+  return conRicetta(dati, opz, async ({ s, login, ricetta }) => {
     const grezzo = scegliAppuntamento(ricetta, adessoRoma(opz.ora));
     if (!grezzo) return { appuntamento: null, date: [], tipo: opz.tipo ?? "O", zona: opz.zona ?? null };
     const appuntamento = appuntamentoSemplice(grezzo);
 
     const zona = opz.zona ?? (await trovaZona(s, grezzo));
-    const cittadino = login?.cittadino ?? {};
     const cerca = async (tipo: Tipo) =>
       leggiDisponibilita(
         await s.chiama(
@@ -270,8 +332,8 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
             ricetta,
             tipo,
             regimeErogazione: grezzo.regimeErogazione ?? null,
-            recapiti: { telefono: cittadino.telefono ?? null, email: cittadino.email ?? null },
-            oggi: oggiRoma(opz.ora),
+            recapiti: recapiti(login),
+            vincoli: { dal: oggiRoma(opz.ora), al: null, mattina: true, pomeriggio: true },
           }),
         ),
       );
@@ -295,22 +357,89 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
       }
     }
     return { appuntamento, date, tipo, zona };
-  } finally {
-    await s
-      .chiama("pgpcitt_sblocca_ricetta_elettronica", { codiceFiscale: dati.codiceFiscale, nre: dati.nre })
-      .catch((e) => console.warn(JSON.stringify({ sblocco: (e as Error).message.slice(0, 120) })));
-  }
-}
-
-async function trovaZona(s: SessionePrenota, appuntamento: any): Promise<Zona> {
-  const provincia = String(appuntamento?.unitaErogante?.presidio?.puntoIndirizzo?.localita?.codice ?? "").slice(0, 3);
-  const zone = await s.chiama<any[]>("pgpcitt_ricerca_zona", {});
-  const z = (zone ?? []).find((x) => x.codiceProvincia === provincia && x.codiceComune === "%");
-  if (!z) throw new Error(`Zona della provincia ${provincia || "?"} non trovata`);
-  return { ...z, codice: `${z.codiceProvincia}${z.codiceComune}` };
+  });
 }
 
 /** Le date libere prima dell'appuntamento, nello stesso presidio. */
 export function dateAnticipate(appuntamento: Appuntamento, date: DataLibera[]): DataLibera[] {
   return date.filter((d) => d.presidio.codice === appuntamento.presidio.codice && d.data < appuntamento.data);
+}
+
+// ---- ricerca nuova -------------------------------------------------------------------------------
+
+/** Ricetta e zone, per preparare una ricerca nuova (e controllare subito i dati). */
+export async function anteprimaRicetta(dati: DatiRicetta, opz: OpzioniGiro = {}): Promise<Anteprima> {
+  return conRicetta(dati, opz, async ({ s, ricetta }) => {
+    const grezzo = scegliAppuntamento(ricetta, adessoRoma(opz.ora));
+    return {
+      prestazione: prestazioneDi(ricetta),
+      tipo: tipoDaRicetta(ricetta),
+      appuntamento: grezzo ? appuntamentoSemplice(grezzo) : null,
+      zone: await zoneDelSito(s),
+    };
+  });
+}
+
+const minuti = (data: string) => Number(data.slice(8, 10)) * 60 + Number(data.slice(10, 12));
+/** Il confine tra mattina e pomeriggio del sito non è documentato: si chiede largo e si filtra qui. */
+const FINE_MATTINA = 14 * 60;
+const INIZIO_POMERIGGIO = 12 * 60;
+
+export function rispettaFiltri(d: DataLibera, f: Filtri, oggi: string): boolean {
+  const giorno = d.data.slice(0, 8);
+  if (giorno < oggi) return false;
+  if (f.dal && giorno < f.dal) return false;
+  if (f.al && giorno > f.al) return false;
+  const m = minuti(d.data);
+  return m >= f.oraDa && m <= f.oraA;
+}
+
+export async function cercaNuova(
+  dati: DatiRicetta,
+  tipo: Tipo,
+  filtri: Filtri,
+  opz: OpzioniSessione & { ora?: Date } = {},
+): Promise<EsitoRicerca> {
+  return conRicetta(dati, opz, async ({ s, login, ricetta }) => {
+    // Anche con la ricetta già prenotata si cerca: può servire una data migliore altrove. Chi chiama decide
+    // cosa fare dell'appuntamento (il giro periodico si ferma se compare dopo l'avvio).
+    const grezzo = scegliAppuntamento(ricetta, adessoRoma(opz.ora));
+    const oggi = oggiRoma(opz.ora);
+    const vincoli: Vincoli = {
+      dal: filtri.dal && filtri.dal > oggi ? filtri.dal : oggi,
+      al: filtri.al,
+      mattina: filtri.oraDa < FINE_MATTINA,
+      pomeriggio: filtri.oraA > INIZIO_POMERIGGIO,
+    };
+    const tutte: DataLibera[] = [];
+    const zoneInErrore: string[] = [];
+    for (const zona of filtri.zone) {
+      try {
+        const r = await s.chiama(
+          "pgpcitt_ricerca_disponibilita",
+          criteriDisponibilita({
+            codiceFiscale: dati.codiceFiscale,
+            zona,
+            ricetta,
+            tipo,
+            regimeErogazione: grezzo?.regimeErogazione ?? null,
+            recapiti: recapiti(login),
+            vincoli,
+          }),
+        );
+        tutte.push(...leggiDisponibilita(r));
+      } catch (e) {
+        if (e instanceof InCoda) throw e;
+        zoneInErrore.push(String(zona.descrizione ?? zona.codice));
+        console.warn(JSON.stringify({ ricerca: { zona: zona.codice, errore: (e as Error).message.slice(0, 120) } }));
+      }
+    }
+    if (zoneInErrore.length === filtri.zone.length) throw new Error("La ricerca è fallita in tutte le zone");
+    const viste = new Set<string>();
+    const date = tutte
+      .filter((d) => rispettaFiltri(d, filtri, oggi))
+      .filter((d) => (viste.has(chiaveData(d)) ? false : (viste.add(chiaveData(d)), true)))
+      .sort((a, b) => a.data.localeCompare(b.data) || a.presidio.descrizione.localeCompare(b.presidio.descrizione));
+    return { appuntamento: grezzo ? appuntamentoSemplice(grezzo) : null, date, zoneInErrore };
+  });
 }

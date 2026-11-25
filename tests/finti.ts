@@ -2,6 +2,7 @@
 import { createClient, type Client } from "@libsql/client";
 import { preparaDb } from "../lib/db.js";
 import { BASE } from "../lib/prenota.js";
+import type { Tastiera } from "../lib/telegram.js";
 
 export const CHIAVE = Buffer.alloc(32, 7);
 export const CF = "RSSMRA80A01F205X";
@@ -13,10 +14,24 @@ export async function dbFinto(): Promise<Client> {
 }
 
 export class TelegramFinto {
-  messaggi: { chatId: string; testo: string }[] = [];
+  messaggi: { id: number; chatId: string; testo: string; tastiera?: Tastiera }[] = [];
   cancellati: number[] = [];
-  async manda(chatId: string | number, testo: string) {
-    this.messaggi.push({ chatId: String(chatId), testo });
+  risposte: { id: string; testo?: string }[] = [];
+  private prossimo = 100;
+  async manda(chatId: string | number, testo: string, tastiera?: Tastiera) {
+    const id = this.prossimo++;
+    this.messaggi.push({ id, chatId: String(chatId), testo, tastiera });
+    return id;
+  }
+  async modifica(_chatId: string | number, messageId: number, testo: string, tastiera?: Tastiera) {
+    const m = this.messaggi.find((x) => x.id === messageId);
+    if (m) {
+      m.testo = testo;
+      m.tastiera = tastiera;
+    }
+  }
+  async rispondiPulsante(id: string, testo?: string) {
+    this.risposte.push({ id, testo });
   }
   async cancella(_chatId: string | number, messageId: number) {
     this.cancellati.push(messageId);
@@ -24,6 +39,10 @@ export class TelegramFinto {
   }
   get ultimo() {
     return this.messaggi.at(-1)?.testo ?? "";
+  }
+  /** L'ultimo messaggio con dei pulsanti. */
+  get conPulsanti() {
+    return [...this.messaggi].reverse().find((m) => m.tastiera && m.tastiera.length > 0);
   }
 }
 

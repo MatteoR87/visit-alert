@@ -1,9 +1,9 @@
 // Database su Turso (SQLite ospitato), via HTTP: adatto alle funzioni serverless.
-// Le tabelle si creano da sole al primo uso. In chiaro solo ID, tipo, orari e contatori: dati sanitari,
-// appuntamento e date già notificate sono cifrati con CHIAVE_CIFRATURA.
+// Le tabelle si creano (e si aggiornano) da sole al primo uso. In chiaro solo ID, modalità, tipo, orari e
+// contatori: dati sanitari, appuntamento, filtri e date sono cifrati con CHIAVE_CIFRATURA.
 import type { Client } from "@libsql/client";
 import { cifraJson, decifraJson } from "./cifratura.js";
-import type { Appuntamento, DataLibera, DatiRicetta, Tipo, Zona } from "./controllo.js";
+import type { Appuntamento, DataLibera, DatiRicetta, Filtri, Tipo, Zona } from "./controllo.js";
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS controlli (
@@ -23,10 +23,19 @@ const SCHEMA = [
     valore TEXT NOT NULL,
     aggiornato TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS bozze (
+    utente_id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    contenuto TEXT NOT NULL,
+    aggiornato TEXT NOT NULL
+  )`,
 ];
 
-/** Quello che serve tra un giro e l'altro (cifrato). */
-export type Contesto = {
+/** Colonne aggiunte dopo la prima versione: si aggiungono alle tabelle che non le hanno. */
+const COLONNE_NUOVE = [{ tabella: "controlli", colonna: "modalita", definizione: "TEXT NOT NULL DEFAULT 'anticipa'" }];
+
+/** Anticipare un appuntamento già prenotato (quello che serve tra un giro e l'altro, cifrato). */
+export type ContestoAnticipa = {
   appuntamento: Appuntamento;
   zona: Zona | null;
   /** Chiavi delle date anticipate già mandate (chiaveData). */
@@ -37,24 +46,43 @@ export type Contesto = {
   primaData: DataLibera | null;
 };
 
-export type Controllo = {
+/** Ricerca nuova con filtri. */
+export type ContestoCerca = {
+  prestazione: string;
+  filtri: Filtri;
+  /** Data dell'appuntamento che la ricetta aveva già all'avvio (se no, una prenotazione nuova ferma la ricerca). */
+  appuntamentoIniziale: string | null;
+  /** Le prime date dell'ultimo giro. */
+  risultati: DataLibera[];
+  /** Chiavi dei risultati già mandati. */
+  notificate: string[];
+};
+
+type Comune = {
   id: number;
   chatId: string;
   utenteId: string;
   dati: DatiRicetta;
-  contesto: Contesto;
   tipo: Tipo;
   creato: string;
   ultimoControllo: string | null;
   ultimoEsito: string | null;
   errori: number;
 };
+export type ControlloAnticipa = Comune & { modalita: "anticipa"; contesto: ContestoAnticipa };
+export type ControlloCerca = Comune & { modalita: "cerca"; contesto: ContestoCerca };
+export type Controllo = ControlloAnticipa | ControlloCerca;
 
 const pronti = new WeakSet<Client>();
 
 export async function preparaDb(db: Client) {
   if (pronti.has(db)) return db;
   for (const s of SCHEMA) await db.execute(s);
+  for (const c of COLONNE_NUOVE) {
+    const info = await db.execute(`PRAGMA table_info(${c.tabella})`);
+    if (!info.rows.some((r) => r.name === c.colonna))
+      await db.execute(`ALTER TABLE ${c.tabella} ADD COLUMN ${c.colonna} ${c.definizione}`);
+  }
   pronti.add(db);
   return db;
 }
@@ -67,29 +95,42 @@ export async function apriDb(amb: { tursoUrl: string; tursoToken: string }): Pro
 const adesso = () => new Date().toISOString();
 
 function daRiga(r: any, chiave: Buffer): Controllo {
-  return {
+  const comune: Comune = {
     id: Number(r.id),
     chatId: String(r.chat_id),
     utenteId: String(r.utente_id),
     dati: decifraJson<DatiRicetta>(String(r.dati), chiave),
-    contesto: decifraJson<Contesto>(String(r.contesto), chiave),
     tipo: String(r.tipo) as Tipo,
     creato: String(r.creato),
     ultimoControllo: r.ultimo_controllo === null ? null : String(r.ultimo_controllo),
     ultimoEsito: r.ultimo_esito === null ? null : String(r.ultimo_esito),
     errori: Number(r.errori ?? 0),
   };
+  return r.modalita === "cerca"
+    ? { ...comune, modalita: "cerca", contesto: decifraJson<ContestoCerca>(String(r.contesto), chiave) }
+    : { ...comune, modalita: "anticipa", contesto: decifraJson<ContestoAnticipa>(String(r.contesto), chiave) };
 }
 
 export async function nuovoControllo(
   db: Client,
   chiave: Buffer,
-  c: Pick<Controllo, "chatId" | "utenteId" | "dati" | "contesto" | "tipo">,
+  c:
+    | Pick<ControlloAnticipa, "chatId" | "utenteId" | "dati" | "contesto" | "tipo" | "modalita">
+    | Pick<ControlloCerca, "chatId" | "utenteId" | "dati" | "contesto" | "tipo" | "modalita">,
 ): Promise<number> {
   const r = await db.execute({
-    sql: `INSERT INTO controlli (chat_id, utente_id, dati, contesto, tipo, creato, ultimo_controllo, ultimo_esito)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'ok')`,
-    args: [c.chatId, c.utenteId, cifraJson(c.dati, chiave), cifraJson(c.contesto, chiave), c.tipo, adesso(), adesso()],
+    sql: `INSERT INTO controlli (chat_id, utente_id, dati, contesto, tipo, modalita, creato, ultimo_controllo, ultimo_esito)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ok')`,
+    args: [
+      c.chatId,
+      c.utenteId,
+      cifraJson(c.dati, chiave),
+      cifraJson(c.contesto, chiave),
+      c.tipo,
+      c.modalita,
+      adesso(),
+      adesso(),
+    ],
   });
   return Number(r.lastInsertRowid);
 }
@@ -97,7 +138,7 @@ export async function nuovoControllo(
 export async function aggiornaControllo(
   db: Client,
   chiave: Buffer,
-  c: Pick<Controllo, "id" | "contesto" | "tipo" | "ultimoEsito" | "errori">,
+  c: { id: number; contesto: ContestoAnticipa | ContestoCerca; tipo: Tipo; ultimoEsito: string | null; errori: number },
 ) {
   await db.execute({
     sql: `UPDATE controlli SET contesto = ?, tipo = ?, ultimo_controllo = ?, ultimo_esito = ?, errori = ? WHERE id = ?`,
@@ -105,7 +146,7 @@ export async function aggiornaControllo(
   });
 }
 
-/** Tutti i controlli, i meno recenti per primi; con `utenteId` solo quelli di quell'utente. */
+/** Tutti i controlli, i meno recenti per primi; con `utenteId` solo quelli di quell'utente, in ordine di ID. */
 export async function leggiControlli(db: Client, chiave: Buffer, utenteId?: string): Promise<Controllo[]> {
   const r = utenteId
     ? await db.execute({ sql: `SELECT * FROM controlli WHERE utente_id = ? ORDER BY id`, args: [utenteId] })
@@ -116,6 +157,46 @@ export async function leggiControlli(db: Client, chiave: Buffer, utenteId?: stri
 export async function cancellaControllo(db: Client, id: number) {
   await db.execute({ sql: `DELETE FROM controlli WHERE id = ?`, args: [id] });
 }
+
+// ---- bozze della procedura guidata (/cerca) ------------------------------------------------------
+
+/** Dopo quanto una bozza abbandonata non vale più. */
+export const DURATA_BOZZA_MS = 60 * 60_000;
+
+export async function scriviBozza<T>(db: Client, chiave: Buffer, utenteId: string, chatId: string, contenuto: T) {
+  await db.execute({
+    sql: `INSERT INTO bozze (utente_id, chat_id, contenuto, aggiornato) VALUES (?, ?, ?, ?)
+          ON CONFLICT(utente_id) DO UPDATE SET chat_id = excluded.chat_id, contenuto = excluded.contenuto,
+          aggiornato = excluded.aggiornato`,
+    args: [utenteId, chatId, cifraJson(contenuto, chiave), adesso()],
+  });
+}
+
+/** La bozza dell'utente, se non è scaduta (quelle scadute si cancellano). */
+export async function leggiBozza<T>(db: Client, chiave: Buffer, utenteId: string): Promise<T | null> {
+  const r = await db.execute({ sql: `SELECT contenuto, aggiornato FROM bozze WHERE utente_id = ?`, args: [utenteId] });
+  const x = r.rows[0];
+  if (!x) return null;
+  if (Date.now() - Date.parse(String(x.aggiornato)) > DURATA_BOZZA_MS) {
+    await cancellaBozza(db, utenteId);
+    return null;
+  }
+  return decifraJson<T>(String(x.contenuto), chiave);
+}
+
+export async function cancellaBozza(db: Client, utenteId: string) {
+  await db.execute({ sql: `DELETE FROM bozze WHERE utente_id = ?`, args: [utenteId] });
+}
+
+/** Le bozze abbandonate contengono dati sanitari: si cancellano a ogni giro del cron. */
+export async function pulisciBozze(db: Client) {
+  await db.execute({
+    sql: `DELETE FROM bozze WHERE aggiornato < ?`,
+    args: [new Date(Date.now() - DURATA_BOZZA_MS).toISOString()],
+  });
+}
+
+// ---- stato del servizio --------------------------------------------------------------------------
 
 export async function scriviStato(db: Client, chiave: string, valore: unknown) {
   await db.execute({

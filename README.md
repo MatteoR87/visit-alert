@@ -1,7 +1,10 @@
 # visit-alert
 
-Avvisa su Telegram quando su [PrenotaSalute](https://prenotasalute.regione.lombardia.it/prenotaonline/)
-(Regione Lombardia) si libera una data **prima** dell'appuntamento già prenotato, **nella stessa struttura**.
+Bot Telegram per [PrenotaSalute](https://prenotasalute.regione.lombardia.it/prenotaonline/) (Regione Lombardia):
+
+- **`/avvia`**: avvisa quando si libera una data **prima** dell'appuntamento già prenotato, **nella stessa struttura**;
+- **`/cerca`**: cerca una visita nelle zone, nel periodo e nella fascia oraria scelti, mostra le **prime 10 date**
+  e avvisa quando ne compaiono di migliori.
 
 Funzioni Vercel senza framework (TypeScript, moduli ESM, regione `fra1`), database Turso, solo chiamate HTTP
 alle API interne del sito: nessun browser. Il servizio legge e basta: non prenota, non sposta, non disdice.
@@ -26,6 +29,29 @@ Se l'appuntamento cambia (spostato da te) il bot lo dice e da lì confronta con 
 più un appuntamento futuro il controllo si ferma e i dati si cancellano. Dopo 3 errori di fila arriva un avviso
 (e un altro quando torna a funzionare); la sala d'attesa attiva del sito non conta come errore: si salta il giro.
 
+### Ricerca nuova (`/cerca`)
+
+Procedura guidata: `/cerca CF CIFRE NRE [O|Z]` (messaggio cancellato subito) → il bot legge la ricetta e le zone
+del sito, poi chiede con i pulsanti:
+
+1. **prima visita o controllo**, solo se dalla ricetta non si capisce (senza appuntamento non c'è un'agenda con
+   cui verificarlo, come fa `/avvia`);
+2. **zone**: le 13 del sito (le province, con Milano città e Milano provincia separate), al massimo 4: ogni zona
+   è una ricerca sul sito da 5-15 secondi;
+3. **periodo**: da subito, entro 30/60/90 giorni, entro 6 mesi, oppure scritto (`01/12/2026-31/01/2027`,
+   `15/1-28/2`, `01/12/2026`);
+4. **fascia oraria**: tutto il giorno, mattina (fino alle 13), pomeriggio (dalle 13), oppure scritta (`8-12`,
+   `14:30-18`). Al sito si chiede mattina e/o pomeriggio (il confine non è documentato, si chiede largo) e
+   l'orario esatto si filtra dopo;
+5. riepilogo e **✅ Avvia**: ricerca in tutte le zone, prime 10 date in ordine e salvataggio come controllo
+   in modalità `cerca`.
+
+La procedura sta nella tabella `bozze` (cifrata) e scade dopo un'ora; i pulsanti di un passo vecchio non fanno
+nulla. A ogni giro del cron la ricerca si ripete: arriva un messaggio con le prime 10 date (🆕 le nuove) quando
+ce n'è una mai mandata e, se l'elenco era già di 10, migliore dell'ultima. La ricetta già prenotata si può
+cercare lo stesso (per trovare di meglio altrove); se invece viene prenotata **dopo** l'avvio della ricerca, la
+ricerca si ferma e i dati si cancellano.
+
 **Prima visita o controllo.** Il sito lo vuole sapere (`O`/`Z`). Come il sito, lo si ricava dalla ricetta
 (campo apposito, "(PRIMA VISITA)"/"(CONTROLLO)" nella descrizione, esenzione per patologia); se non basta si
 prova `O` e si verifica che le date siano nell'agenda dell'appuntamento, altrimenti `Z`. Il risultato si salva
@@ -36,9 +62,10 @@ al primo `/avvia`. `/avvia … O` o `/avvia … Z` lo forza.
 | Comando | Cosa fa |
 |---|---|
 | `/avvia CODICEFISCALE CIFRE NRE [O\|Z]` | avvia un controllo. CIFRE = ultime 5 cifre della tessera sanitaria. Il messaggio si **cancella subito** (anche se sbagliato o da chi non è abilitato); il bot fa un giro e risponde con l'appuntamento trovato e, se ci sono già, le date anticipate. Un nuovo `/avvia` con lo stesso NRE sostituisce il precedente |
-| `/stato` | stato del cron (🟢/🟠/🔴) e dei propri controlli: appuntamento, prima data libera nella struttura, ultimo esito |
-| `/date [N]` | controlla adesso e mostra tutte le date libere prima dell'appuntamento |
-| `/stop [N]` | ferma il controllo e **cancella** i suoi dati |
+| `/cerca CODICEFISCALE CIFRE NRE [O\|Z]` | ricerca nuova con procedura guidata a pulsanti (vedi sopra). Messaggio cancellato subito |
+| `/stato` | stato del cron (🟢/🟠/🔴) e dei propri controlli e ricerche: appuntamento o filtri, prima data, ultimo esito |
+| `/date [N]` | controlla adesso e mostra le date (anticipate, o le prime 10 della ricerca) |
+| `/stop [N]` | ferma il controllo o la ricerca e **cancella** i suoi dati |
 | `/aiuto` | come si usa |
 | `/id` | il proprio ID Telegram e quello della chat (risponde a tutti) |
 
@@ -47,11 +74,15 @@ da cui è partito `/avvia`.
 
 ## Dati
 
-Turso, due tabelle:
+Turso, tre tabelle:
 
-- `controlli`: in chiaro solo ID, chat, utente, tipo (`O`/`Z`), orari, ultimo esito e contatore errori. Cifrati
-  con AES-256-GCM (`CHIAVE_CIFRATURA`): i dati sanitari (codice fiscale, cifre della tessera, NRE) e il contesto
-  (appuntamento, zona, date già notificate). Senza la chiave, che sta solo su Vercel, il database non basta a leggerli.
+- `controlli`: in chiaro solo ID, chat, utente, modalità (`anticipa`/`cerca`), tipo (`O`/`Z`), orari, ultimo
+  esito e contatore errori. Cifrati con AES-256-GCM (`CHIAVE_CIFRATURA`): i dati sanitari (codice fiscale, cifre
+  della tessera, NRE) e il contesto (appuntamento o filtri, zone, date già notificate). Senza la chiave, che sta
+  solo su Vercel, il database non basta a leggerli. La colonna `modalita` si aggiunge da sola ai database della
+  prima versione (le righe esistenti sono `anticipa`);
+- `bozze`: la procedura di `/cerca` in corso, cifrata; si cancella all'avvio, all'annullamento o, se abbandonata,
+  dopo un'ora (al primo giro del cron);
 - `stato`: riepilogo dell'ultimo giro del cron, per `/stato`.
 
 Codice fiscale, cifre della tessera e NRE arrivano **solo** da `/avvia`: mai variabili d'ambiente, mai nei log.
@@ -116,7 +147,8 @@ fa il deploy in produzione da solo.
 
 1. Deploy con tutte le variabili tranne `TELEGRAM_UTENTI`.
 2. Apri `https://visit-alert.vercel.app/api/configura?chiave=<segreto>`: collega il webhook del bot (con un segreto
-   che Telegram rimanda a ogni messaggio), imposta il menu dei comandi e crea le tabelle. Deve rispondere `"ok": true`.
+   che Telegram rimanda a ogni messaggio; messaggi e tocchi sui pulsanti), imposta il menu dei comandi e crea le
+   tabelle. Deve rispondere `"ok": true`. Va riaperto dopo un deploy che cambia i comandi o i tipi di aggiornamento.
 3. Scrivi `/id` al bot, metti il tuo ID in `TELEGRAM_UTENTI` e fai **Redeploy**.
 4. Scrivi `/avvia CODICEFISCALE CIFRE NRE` al bot.
 5. Su cron-job.org (fuso orario Europe/Rome) due job verso `https://visit-alert.vercel.app/api/controlla`, metodo

@@ -136,7 +136,8 @@ test("giro: appuntamento cambiato si segnala; appuntamento sparito ferma il cont
   await controllaUno(c, ctx);
   assert.match(tg.ultimo, /appuntamento è cambiato/);
   [c] = await leggiControlli(db, CHIAVE);
-  assert.equal(c.contesto.appuntamento.data, "20270420083000");
+  assert.equal(c.modalita, "anticipa");
+  if (c.modalita === "anticipa") assert.equal(c.contesto.appuntamento.data, "20270420083000");
 
   sito.stato.esito = { appuntamento: null, date: [], tipo: "O", zona: null };
   assert.equal(await controllaUno(c, ctx), "finito");

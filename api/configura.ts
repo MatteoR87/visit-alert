@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     await tg.chiama("setWebhook", {
       url: webhook,
       secret_token: segretoWebhook(amb),
-      allowed_updates: ["message"],
+      allowed_updates: ["message", "callback_query"],
       drop_pending_updates: true,
     });
     await tg.chiama("setMyCommands", { commands: COMANDI });

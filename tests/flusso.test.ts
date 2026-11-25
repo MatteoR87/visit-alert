@@ -39,7 +39,7 @@ async function ambiente() {
   const db = await dbFinto();
   const tg = new TelegramFinto();
   const sito = sitoProgrammabile();
-  const ctx = { db, chiave: CHIAVE, utenti: new Set([UTENTE]), tg, giro: sito.giro };
+  const ctx = { db, chiave: CHIAVE, utenti: new Set([UTENTE]), tg, giro: sito.giro, prenotazioneReale: false };
   const scrivi = (text: string, from = UTENTE, message_id = 1) =>
     gestisciAggiornamento({ message: { message_id, text, chat: { id: Number(CHAT) }, from: { id: Number(from) } } }, ctx);
   return { db, tg, sito, ctx, scrivi };
@@ -122,7 +122,7 @@ test("giro: una data anticipata nuova si notifica una volta, con tutte le altre"
   sito.stato.esito = { ...sito.stato.esito, date: [libera("20270401083000"), libera("20270403083000")] };
   const [c] = await leggiControlli(db, CHIAVE);
   assert.equal(await controllaUno(c, ctx), "notificato");
-  assert.match(tg.ultimo, /• gio 01\/04\/2027/);
+  assert.match(tg.ultimo, /1\. gio 01\/04\/2027/);
   assert.match(tg.ultimo, /🆕 sab 03\/04\/2027/);
   assert.equal(sito.chiamate.at(-1)!.tipo, "O"); // il tipo salvato si riusa
 });
@@ -186,7 +186,7 @@ test("/stato, /date e /stop", async () => {
   await scrivi("/date");
   assert.match(tg.ultimo, /🆕 gio 01\/04\/2027/);
   await scrivi("/date 1");
-  assert.match(tg.ultimo, /• gio 01\/04\/2027/); // stessa data, già notificata: la rimostra senza 🆕
+  assert.match(tg.ultimo, /1\. gio 01\/04\/2027/); // stessa data, già notificata: la rimostra senza 🆕
 
   await scrivi("/stop 1");
   assert.match(tg.ultimo, /fermato/);

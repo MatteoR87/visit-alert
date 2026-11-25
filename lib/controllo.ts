@@ -151,21 +151,23 @@ function criteriRicetta(dati: DatiRicetta) {
   };
 }
 
-/** La ricetta come la rimanda il sito nella ricerca delle disponibilità (altrimenti risponde ES0001). */
-function ricettaPerDisponibilita(ricetta: any) {
+/**
+ * La ricetta come la rimanda il sito (Ricetta.newFrom): le date restano stringhe AAAAMMGG (Dates.newDate lascia
+ * le stringhe come sono) e c'è `prestazioniPrenotate` (le prestazioni in stato 03), senza la quale la ricerca
+ * non trova nulla o risponde ES0001 (provato il 25/11/2026).
+ */
+export function ricettaPerDisponibilita(ricetta: any) {
   return {
     ...ricetta,
-    emessaIl: mezzanotteRomaIso(ricetta.emessaIl),
-    scadenzaIl: mezzanotteRomaIso(ricetta.scadenzaIl),
     prestazioniPrenotate: (ricetta.prestazioni ?? []).filter((p: any) => p?.stato?.codice === "03"),
     appuntamentiUnificati: null,
   };
 }
 
-type Vincoli = { dal: string; al: string | null; mattina: boolean; pomeriggio: boolean };
+export type Vincoli = { dal: string; al: string | null; mattina: boolean; pomeriggio: boolean };
 
 const sn = (b: boolean) => (b ? "S" : "N");
-function criteriDisponibilita(p: {
+export function criteriDisponibilita(p: {
   codiceFiscale: string;
   zona: Zona;
   ricetta: any;
@@ -225,7 +227,7 @@ export function scegliAppuntamento(ricetta: any, adesso: string): any | null {
   );
 }
 
-function appuntamentoSemplice(a: any): Appuntamento {
+export function appuntamentoSemplice(a: any): Appuntamento {
   return {
     data: a.data,
     prestazione: String(a.prestazione?.descrizione ?? ""),
@@ -278,10 +280,16 @@ function prestazioneDi(ricetta: any): string {
 
 // ---- sessione con la ricetta ---------------------------------------------------------------------
 
-type Sessione = { s: SessionePrenota; login: any; ricetta: any };
+export type Sessione = {
+  s: SessionePrenota;
+  login: any;
+  ricetta: any;
+  /** Da mettere a true dopo una prenotazione riuscita: la ricetta è usata e NON va sbloccata (come fa il sito). */
+  prenotata: boolean;
+};
 
-/** Accesso e ricetta; `lavoro` gira con la ricetta bloccata, che poi si sblocca sempre. */
-async function conRicetta<T>(dati: DatiRicetta, opz: OpzioniSessione, lavoro: (x: Sessione) => Promise<T>): Promise<T> {
+/** Accesso e ricetta; `lavoro` gira con la ricetta bloccata, che poi si sblocca (salvo dopo una prenotazione). */
+export async function conRicetta<T>(dati: DatiRicetta, opz: OpzioniSessione, lavoro: (x: Sessione) => Promise<T>): Promise<T> {
   const s = new SessionePrenota({ timeoutMs: 40_000, ...opz });
   await s.apri();
   await s.parametri();
@@ -293,6 +301,7 @@ async function conRicetta<T>(dati: DatiRicetta, opz: OpzioniSessione, lavoro: (x
       throw new ErroreUtente(`Accesso rifiutato dal sito (${e.codice}): controlla codice fiscale e cifre della tessera`);
     throw e;
   }
+  const sessione: Sessione = { s, login, ricetta: null, prenotata: false };
   try {
     let rr: any;
     try {
@@ -303,15 +312,17 @@ async function conRicetta<T>(dati: DatiRicetta, opz: OpzioniSessione, lavoro: (x
     }
     const ricetta = rr?.ricette?.[0];
     if (!ricetta) throw new ErroreUtente(MESSAGGI["RICETTA.RICERCA.KO"]);
-    return await lavoro({ s, login, ricetta });
+    sessione.ricetta = ricetta;
+    return await lavoro(sessione);
   } finally {
-    await s
-      .chiama("pgpcitt_sblocca_ricetta_elettronica", { codiceFiscale: dati.codiceFiscale, nre: dati.nre })
-      .catch((e) => console.warn(JSON.stringify({ sblocco: (e as Error).message.slice(0, 120) })));
+    if (!sessione.prenotata)
+      await s
+        .chiama("pgpcitt_sblocca_ricetta_elettronica", { codiceFiscale: dati.codiceFiscale, nre: dati.nre })
+        .catch((e) => console.warn(JSON.stringify({ sblocco: (e as Error).message.slice(0, 120) })));
   }
 }
 
-function recapiti(login: any) {
+export function recapiti(login: any) {
   const c = login?.cittadino ?? {};
   return { telefono: c.telefono ?? null, email: c.email ?? null };
 }

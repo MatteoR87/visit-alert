@@ -26,7 +26,14 @@ import {
   type ControlloAnticipa,
   type ControlloCerca,
 } from "./db.js";
-import { descriviAppuntamento, formatoData, messaggioAnticipate, messaggioRisultati, PRIMI_RISULTATI } from "./messaggi.js";
+import {
+  descriviAppuntamento,
+  formatoData,
+  messaggioAnticipate,
+  messaggioRisultati,
+  PRIMI_RISULTATI,
+  tastieraPrenota,
+} from "./messaggi.js";
 import { InCoda } from "./prenota.js";
 import { html, type Telegram } from "./telegram.js";
 
@@ -108,7 +115,8 @@ async function controllaAnticipa(c: ControlloAnticipa, ctx: Contesto): Promise<E
   const anticipate = dateAnticipate(r.appuntamento, r.date);
   const giaNotificate = new Set(cambiato ? [] : c.contesto.notificate);
   const nuove = new Set(anticipate.map(chiaveData).filter((k) => !giaNotificate.has(k)));
-  if (nuove.size > 0) await ctx.tg.manda(c.chatId, messaggioAnticipate(c.id, r.appuntamento, anticipate, nuove));
+  if (nuove.size > 0)
+    await ctx.tg.manda(c.chatId, messaggioAnticipate(c.id, r.appuntamento, anticipate, nuove), tastieraPrenota(c.id, anticipate));
 
   await aggiornaControllo(ctx.db, ctx.chiave, {
     id: c.id,
@@ -166,7 +174,11 @@ async function controllaCerca(c: ControlloCerca, ctx: Contesto): Promise<Esito> 
   const primi = r.date.slice(0, PRIMI_RISULTATI);
   const nuove = nuoveDaNotificare(primi, c.contesto.risultati, c.contesto.notificate);
   if (nuove.size > 0)
-    await ctx.tg.manda(c.chatId, messaggioRisultati(c.id, c.contesto.prestazione, c.contesto.filtri, primi, nuove));
+    await ctx.tg.manda(
+      c.chatId,
+      messaggioRisultati(c.id, c.contesto.prestazione, c.contesto.filtri, primi, nuove),
+      tastieraPrenota(c.id, primi),
+    );
 
   await aggiornaControllo(ctx.db, ctx.chiave, {
     id: c.id,

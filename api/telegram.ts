@@ -18,7 +18,13 @@ export async function POST(request: Request) {
   const update = await request.json().catch(() => null);
   const lavoro = (async () => {
     const db = await apriDb(amb);
-    await gestisciAggiornamento(update, { db, chiave: amb.chiave, utenti: amb.utenti, tg: new Telegram(amb.botToken) });
+    await gestisciAggiornamento(update, {
+      db,
+      chiave: amb.chiave,
+      utenti: amb.utenti,
+      tg: new Telegram(amb.botToken),
+      prenotazioneReale: amb.prenotazioneReale,
+    });
   })().catch((e) => console.error(JSON.stringify({ telegram: (e as Error).message.slice(0, 300) })));
   waitUntil(lavoro);
   return Response.json({ ok: true });

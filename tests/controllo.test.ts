@@ -72,7 +72,7 @@ test("giro: accesso, ricetta, zona, disponibilità con la ricetta nel formato de
     "pgpcitt_sblocca_ricetta_elettronica",
   ]);
   const disp = chiamate.find((c) => c.destinazione === "pgpcitt_ricerca_disponibilita")!.arg;
-  assert.equal(disp.ricetta.emessaIl, "2026-11-17T23:00:00.000Z");
+  assert.equal(disp.ricetta.emessaIl, "20261118"); // come il sito: la stringa resta com'è
   assert.equal(disp.ricetta.prestazioniPrenotate.length, 1);
   assert.equal(disp.ricetta.appuntamentiUnificati, null);
   assert.equal(disp.vincoliTemporali.dal, "20261124000000");

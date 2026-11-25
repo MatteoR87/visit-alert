@@ -204,6 +204,7 @@ async function ambiente(opz: { tipo?: "O" | "Z" | null; prenotata?: boolean } = 
     utenti: new Set([UTENTE]),
     tg,
     cerca,
+    prenotazioneReale: false,
     ora: () => ORA,
     anteprima: async () => ({
       prestazione: "VISITA CARDIOLOGICA",
@@ -283,7 +284,8 @@ test("/cerca: procedura completa a pulsanti e testo, salvataggio cifrato e prime
   ]);
   assert.match(tg.ultimo, /Ricerca #1/);
   assert.match(tg.ultimo, /Le prime 10 date libere/);
-  assert.equal((tg.ultimo.match(/^• /gm) ?? []).length, 10);
+  assert.equal((tg.ultimo.match(/^\d+\. /gm) ?? []).length, 10);
+  assert.equal(tg.messaggi.at(-1)!.tastiera!.flat().length, 10); // 📅 1 … 📅 10
 
   const [c] = await leggiControlli(db, CHIAVE, UTENTE);
   assert.equal(c.modalita, "cerca");

@@ -26,6 +26,7 @@ import {
   messaggioRisultati,
   nomeZona,
   PRIMI_RISULTATI,
+  tastieraPrenota,
 } from "./messaggi.js";
 import type { AnteprimaSito, CercaSito } from "./monitor.js";
 import { InCoda } from "./prenota.js";
@@ -370,5 +371,5 @@ async function avvia(b: Bozza, utenteId: string, chatId: string, ctx: ContestoCe
   });
   await cancellaBozza(ctx.db, utenteId);
   await ctx.tg.modifica(chatId, b.messaggio, `✅ <b>Ricerca #${id} avviata</b>`);
-  await ctx.tg.manda(chatId, messaggioRisultati(id, b.prestazione, filtri, primi, new Set(), r.zoneInErrore));
+  await ctx.tg.manda(chatId, messaggioRisultati(id, b.prestazione, filtri, primi, new Set(), r.zoneInErrore), tastieraPrenota(id, primi));
 }

@@ -1,7 +1,7 @@
 // Testi dei messaggi del bot (HTML di Telegram).
 import { chiaveData, fasceDi, type Appuntamento, type DataLibera, type Fascia, type Filtri, type Tipo } from "./controllo.js";
 import { formatoGiorno, formatoOra } from "./dati.js";
-import { html } from "./telegram.js";
+import { html, type Tastiera } from "./telegram.js";
 
 const GIORNI = ["dom", "lun", "mar", "mer", "gio", "ven", "sab"];
 export const SITO = "https://prenotasalute.regione.lombardia.it/prenotaonline/";
@@ -28,14 +28,33 @@ export function descriviAppuntamento(a: Appuntamento): string {
   ].join("\n");
 }
 
-function riga(d: DataLibera, appuntamento: Appuntamento, nuove?: Set<string>) {
-  const nuovo = nuove?.has(chiaveData(d)) ? "🆕 " : "• ";
+/** Quante date di un messaggio hanno il pulsante "📅 N" per prenotarle. */
+export const DATE_PRENOTABILI = 10;
+
+/** "1." per le date con il pulsante Prenota, "•" per le altre. */
+function numero(i: number) {
+  return i < DATE_PRENOTABILI ? `${i + 1}.` : "•";
+}
+
+function riga(d: DataLibera, i: number, appuntamento: Appuntamento, nuove?: Set<string>) {
+  const nuovo = nuove?.has(chiaveData(d)) ? "🆕 " : "";
   const agenda = d.agenda.codice !== appuntamento.agenda.codice ? ` <i>(altra agenda: ${html(d.agenda.descrizione)})</i>` : "";
-  return `${nuovo}${formatoData(d.data)}${agenda}`;
+  return `${numero(i)} ${nuovo}${formatoData(d.data)}${agenda}`;
+}
+
+/** I pulsanti "📅 N" sotto un elenco di date: toccandone uno il bot chiede conferma prima di prenotare. */
+export function tastieraPrenota(id: number, date: DataLibera[]): Tastiera {
+  const pulsanti = date.slice(0, DATE_PRENOTABILI).map((d, i) => ({
+    text: `📅 ${i + 1}`,
+    callback_data: `p:${id}:${d.data}:${d.presidio.codice}`,
+  }));
+  const righe: Tastiera = [];
+  for (let i = 0; i < pulsanti.length; i += 5) righe.push(pulsanti.slice(i, i + 5));
+  return righe;
 }
 
 export function elencoDate(date: DataLibera[], appuntamento: Appuntamento, nuove?: Set<string>): string {
-  const righe = date.slice(0, MAX_DATE).map((d) => riga(d, appuntamento, nuove));
+  const righe = date.slice(0, MAX_DATE).map((d, i) => riga(d, i, appuntamento, nuove));
   if (date.length > MAX_DATE) righe.push(`… e altre ${date.length - MAX_DATE}`);
   return righe.join("\n");
 }
@@ -54,7 +73,7 @@ export function messaggioAnticipate(
     `Nella stessa struttura (${anticipate.length}):`,
     elencoDate(anticipate, appuntamento, nuove),
     "",
-    `Per spostarlo: <a href="${SITO}">PrenotaSalute</a> → "Sposta", oppure 800 638638. I posti possono sparire in fretta.`,
+    `Per spostarlo tocca 📅 e il numero (ti chiedo conferma), oppure <a href="${SITO}">PrenotaSalute</a> → "Sposta", o 800 638638. I posti possono sparire in fretta.`,
   ].join("\n");
 }
 
@@ -92,9 +111,9 @@ export function descriviFiltri(f: Filtri): string {
   ].join("\n");
 }
 
-function rigaRisultato(d: DataLibera, nuove?: Set<string>) {
-  const segno = nuove?.has(chiaveData(d)) ? "🆕" : "•";
-  return `${segno} <b>${formatoData(d.data)}</b> — ${html(d.presidio.descrizione)}${d.unita ? `\n    <i>${html(d.unita)}</i>` : ""}`;
+function rigaRisultato(d: DataLibera, i: number, nuove?: Set<string>) {
+  const segno = nuove?.has(chiaveData(d)) ? "🆕 " : "";
+  return `${numero(i)} ${segno}<b>${formatoData(d.data)}</b> — ${html(d.presidio.descrizione)}${d.unita ? `\n    <i>${html(d.unita)}</i>` : ""}`;
 }
 
 export function messaggioRisultati(
@@ -112,11 +131,14 @@ export function messaggioRisultati(
     risultati.length > 0
       ? `Le prime ${Math.min(risultati.length, PRIMI_RISULTATI)} date libere:`
       : "Per ora nessuna data che rispetta i filtri: ti scrivo appena ne compare una.",
-    ...risultati.slice(0, PRIMI_RISULTATI).map((d) => rigaRisultato(d, nuove)),
+    ...risultati.slice(0, PRIMI_RISULTATI).map((d, i) => rigaRisultato(d, i, nuove)),
   ];
   if (zoneInErrore.length > 0) righe.push("", `⚠️ Non sono riuscito a cercare in: ${html(zoneInErrore.join(", "))}.`);
   if (risultati.length > 0)
-    righe.push("", `Per prenotare: <a href="${SITO}">PrenotaSalute</a> oppure 800 638638. I posti possono sparire in fretta.`);
+    righe.push(
+      "",
+      `Per prenotare tocca 📅 e il numero (ti chiedo conferma), oppure <a href="${SITO}">PrenotaSalute</a> o 800 638638. I posti possono sparire in fretta.`,
+    );
   return righe.join("\n");
 }
 
@@ -133,5 +155,5 @@ export const AIUTO = [
   "<code>/stop N</code> ferma il controllo o la ricerca N e cancella i suoi dati",
   "<code>/id</code> il tuo ID Telegram",
   "",
-  "Il bot legge e basta: non prenota né disdice nulla.",
+  "Sotto le date ci sono i pulsanti 📅 1, 📅 2…: il bot prenota solo dopo che hai confermato quella data. Se la ricetta è già prenotata, il sito annulla da solo l'appuntamento precedente.",
 ].join("\n");

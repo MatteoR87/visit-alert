@@ -4,10 +4,41 @@ Bot Telegram per [PrenotaSalute](https://prenotasalute.regione.lombardia.it/pren
 
 - **`/avvia`**: avvisa quando si libera una data **prima** dell'appuntamento già prenotato, **nella stessa struttura**;
 - **`/cerca`**: cerca una visita nelle zone, nel periodo e nella fascia oraria scelti, mostra le **prime 10 date**
-  e avvisa quando ne compaiono di migliori.
+  e avvisa quando ne compaiono di migliori;
+- **📅 Prenota**: sotto le date, un pulsante per prenotarle, **solo dopo una conferma esplicita** (vedi
+  "Prenotazione").
 
 Funzioni Vercel senza framework (TypeScript, moduli ESM, regione `fra1`), database Turso, solo chiamate HTTP
-alle API interne del sito: nessun browser. Il servizio legge e basta: non prenota, non sposta, non disdice.
+alle API interne del sito: nessun browser. I giri del cron leggono e basta; si prenota solo dal pulsante, dopo la
+conferma, e non si disdice mai (lo spostamento lo gestisce il sito).
+
+## Prenotazione
+
+Sotto ogni elenco di date (notifiche, `/avvia`, `/date`, risultati di `/cerca`) le prime 10 sono numerate e hanno
+un pulsante **📅 N**:
+
+1. **📅 N** → il bot mostra data, ospedale e reparto e le avvertenze: se la ricetta è già prenotata, *il sito
+   annulla automaticamente l'appuntamento attuale* (testo del sito: "confermando una nuova prenotazione,
+   l'appuntamento precedente verrà automaticamente annullato"); il ticket si paga se non ci si presenta senza
+   disdire almeno 2 giorni lavorativi prima. Pulsanti **✅ Prenota** (o **🧪 Prova**) e **❌ No**.
+2. **✅ Prenota** (entro 10 minuti, un tentativo alla volta per controllo) → in un'unica sessione: accesso,
+   ricetta, la stessa ricerca dei giri nelle zone del controllo, la data con lo stesso giorno/ora e presidio
+   (e agenda, se ce ne sono più d'una), poi `pgpcitt_conferma_disponibilita`.
+3. Esito: **prenotato** (nuovo appuntamento, codice CUP, importo; un controllo `/avvia` continua confrontando con
+   il nuovo appuntamento, una ricerca `/cerca` finisce), **non più disponibile**, o l'errore del sito.
+
+La richiesta (`ConfermaDisponibilita` del sito): `{codiceFiscale, disponibilita: [{selezionabile, appuntamento,
+prestazioni: null, richiesta, primaDataProposta}], appuntamenti: [], zona, ricetta (come nella ricerca, con
+appuntamenti: null), tipoPrestazione, recapiti}`; `appuntamento` è quello della disponibilità con `cicli`,
+`differita` e `ricetta: {iup, iurp, modulo: {id}}` (Appuntamento.newFrom). `richiesta` è il codice che lega la
+data alla ricerca appena fatta: per questo si rifà la ricerca.
+
+Dopo una prenotazione riuscita la ricetta **non** si sblocca (il sito fa lo stesso); dopo un rifiuto del sito sì.
+Se la conferma non riceve risposta (rete), non si sblocca e si invita a controllare su PrenotaSalute.
+
+**Modalità prova** (default, finché `PRENOTAZIONE_REALE` non è `1`): tutto tranne la conferma; il pulsante è
+🧪 Prova, la risposta dice "Non ho prenotato nulla" e nei log di Vercel va la struttura della richiesta con i
+valori mascherati (`{"prova_prenotazione": …}`: stringhe come `<s:lunghezza>`, salvo date e codici).
 
 ## Come funziona
 
@@ -128,7 +159,11 @@ Lo stesso percorso del pulsante "Sposta" del sito, fermandosi prima di scegliere
 6. `pgpcitt_sblocca_ricetta_elettronica` `{codiceFiscale, nre}`: **sempre**, anche dopo un errore, come fa il sito
    all'uscita dal flusso.
 
-Mai chiamati: `pgpcitt_conferma_disponibilita`, `pgpcitt_annulla_appuntamento` e simili.
+Mai chiamati dai giri: `pgpcitt_conferma_disponibilita` (solo dal pulsante, vedi "Prenotazione"),
+`pgpcitt_annulla_appuntamento` e simili (mai).
+
+Lo sblocco funziona solo nella stessa sessione della ricerca della ricetta: chiamato da solo il sito risponde
+`ERROR.UNHANDLED` (provato il 25/11/2026).
 
 ## Configurazione
 
@@ -142,6 +177,7 @@ Mai chiamati: `pgpcitt_conferma_disponibilita`, `pgpcitt_annulla_appuntamento` e
 | `TURSO_AUTH_TOKEN` | token del database, lettura e scrittura |
 | `CHIAVE_CIFRATURA` | 32 byte casuali in base64: cifra i dati nel database |
 | `CRON_SEGRETO` | segreto di `/api/controlla`, `/api/configura` e `/api/test-prenota`: `Authorization: Bearer …` o `?chiave=` |
+| `PRENOTAZIONE_REALE` | facoltativa: `1` perché 📅 → ✅ prenoti davvero; altrimenti modalità prova |
 
 Dopo aver cambiato una variabile serve un **nuovo deploy** (Deployments → ⋯ → Redeploy). Ogni push su `main`
 fa il deploy in produzione da solo.

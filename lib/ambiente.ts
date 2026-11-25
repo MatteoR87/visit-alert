@@ -14,6 +14,11 @@ export type Ambiente = {
   chiave: Buffer;
   /** Segreto di /api/controlla, /api/configura e /api/test-prenota. */
   segreto: string;
+  /**
+   * "1" = il pulsante Prenota prenota davvero. Altrimenti modalità prova: tutto tranne l'invio finale, con la
+   * richiesta (mascherata) nei log.
+   */
+  prenotazioneReale: boolean;
 };
 
 export class ConfigurazioneMancante extends Error {}
@@ -43,6 +48,7 @@ export function leggiAmbiente(env: NodeJS.ProcessEnv = process.env): Ambiente {
     tursoToken: richiesta(env, "TURSO_AUTH_TOKEN"),
     chiave: leggiChiave(richiesta(env, "CHIAVE_CIFRATURA")),
     segreto: richiesta(env, "CRON_SEGRETO"),
+    prenotazioneReale: env.PRENOTAZIONE_REALE?.trim() === "1",
   };
 }
 

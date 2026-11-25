@@ -12,13 +12,16 @@ import {
   formatoTipo,
   messaggioAnticipate,
   messaggioRisultati,
+  tastieraPrenota,
 } from "./messaggi.js";
 import { controllaUno, type Contesto as ContestoMonitor } from "./monitor.js";
 import { InCoda } from "./prenota.js";
+import { annullaConferma, chiediConferma, eseguiPrenotazione, type ContestoPrenota } from "./prenota-bot.js";
 import { html } from "./telegram.js";
 
 export type ContestoBot = ContestoMonitor &
-  ContestoCerca & {
+  ContestoCerca &
+  ContestoPrenota & {
     db: Client;
     utenti: Set<string>;
   };
@@ -97,7 +100,11 @@ async function pulsante(q: any, ctx: ContestoBot) {
     await ctx.tg.rispondiPulsante(q.id, "Non sei abilitato");
     return;
   }
-  if (String(q.data ?? "").startsWith("c:")) return gestisciPulsante(q, utenteId, ctx);
+  const dato = String(q.data ?? "");
+  if (dato.startsWith("c:")) return gestisciPulsante(q, utenteId, ctx);
+  if (dato.startsWith("p:")) return chiediConferma(q, utenteId, ctx);
+  if (dato.startsWith("pc:")) return eseguiPrenotazione(q, utenteId, ctx);
+  if (dato === "px") return annullaConferma(q, ctx);
   await ctx.tg.rispondiPulsante(q.id);
 }
 
@@ -160,7 +167,11 @@ async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx:
   ];
   await ctx.tg.manda(chatId, righe.join("\n"));
   if (anticipate.length > 0)
-    await ctx.tg.manda(chatId, messaggioAnticipate(id, r.appuntamento, anticipate, new Set(anticipate.map(chiaveData))));
+    await ctx.tg.manda(
+      chatId,
+      messaggioAnticipate(id, r.appuntamento, anticipate, new Set(anticipate.map(chiaveData))),
+      tastieraPrenota(id, anticipate),
+    );
 }
 
 /**
@@ -242,12 +253,16 @@ async function date(argomenti: string[], chatId: string, utenteId: string, ctx: 
 
   if (aggiornato.modalita === "cerca") {
     const k = aggiornato.contesto;
-    await ctx.tg.manda(chatId, messaggioRisultati(aggiornato.id, k.prestazione, k.filtri, k.risultati));
+    await ctx.tg.manda(
+      chatId,
+      messaggioRisultati(aggiornato.id, k.prestazione, k.filtri, k.risultati),
+      tastieraPrenota(aggiornato.id, k.risultati),
+    );
     return;
   }
   const { appuntamento, anticipate, primaData } = aggiornato.contesto;
   if (anticipate.length > 0) {
-    await ctx.tg.manda(chatId, messaggioAnticipate(c.id, appuntamento, anticipate, new Set()));
+    await ctx.tg.manda(chatId, messaggioAnticipate(c.id, appuntamento, anticipate, new Set()), tastieraPrenota(c.id, anticipate));
     return;
   }
   await ctx.tg.manda(

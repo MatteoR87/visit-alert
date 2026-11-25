@@ -1,7 +1,8 @@
 // /cerca: ricerca di una visita nuova, con procedura guidata a pulsanti.
-//   /cerca CF CIFRE NRE [O|Z] → (tipo, se non si capisce) → zone → periodo → orario → riepilogo → ✅ Avvia
-// La bozza (dati sanitari compresi) sta nel database cifrata e scade dopo un'ora; all'avvio diventa un
-// controllo in modalità "cerca", ricontrollato dal cron.
+//   /cerca CF CIFRE NRE [O|Z] → (tipo, se non si capisce) → zone → periodo → orario → riepilogo → ✅ Cerca
+// La bozza (dati sanitari compresi) sta nel database cifrata e scade dopo un'ora. Con ✅ Cerca diventa un
+// controllo in modalità "cerca" NON monitorato (servono i dati per i pulsanti 📅): il cron lo ripete solo dopo
+// un tocco su 🔔, altrimenti si cancella dopo un'ora (o subito con 🗑).
 import type { Client } from "@libsql/client";
 import {
   anteprimaRicetta,
@@ -16,7 +17,7 @@ import {
   type Zona,
 } from "./controllo.js";
 import { leggiDatiRicetta, leggiFasce, leggiPeriodo, ordinaFasce, piuGiorni } from "./dati.js";
-import { cancellaBozza, leggiBozza, nuovoControllo, scriviBozza } from "./db.js";
+import { aggiornaControllo, cancellaBozza, cancellaControllo, leggiBozza, leggiControlli, nuovoControllo, scriviBozza } from "./db.js";
 import {
   descriviFascia,
   descriviFasce,
@@ -25,8 +26,9 @@ import {
   formatoTipo,
   messaggioRisultati,
   nomeZona,
+  NON_MONITORATA,
   PRIMI_RISULTATI,
-  tastieraPrenota,
+  tastieraRicerca,
 } from "./messaggi.js";
 import { salvaProposte, type AnteprimaSito, type CercaSito } from "./monitor.js";
 import { InCoda } from "./prenota.js";
@@ -53,7 +55,7 @@ const stessa = (x: Fascia, y: Fascia) => x.da === y.da && x.a === y.a;
 export type ContestoCerca = {
   db: Client;
   chiave: Buffer;
-  tg: Pick<Telegram, "manda" | "cancella" | "modifica" | "rispondiPulsante">;
+  tg: Pick<Telegram, "manda" | "cancella" | "modifica" | "rispondiPulsante" | "pulsanti">;
   anteprima?: AnteprimaSito;
   cerca?: CercaSito;
   /** "Adesso", per i test. */
@@ -179,10 +181,10 @@ export function schermata(b: Bozza): { testo: string; tastiera: Tastiera } {
     }
     case "conferma":
       return {
-        testo: `${intestazione(b)}\n\n${descriviFiltri(filtriDi(b))}\n\nTi mostro le prime ${PRIMI_RISULTATI} date e poi ricontrollo ogni 15 minuti di giorno (ogni ora di notte), avvisandoti quando ne compaiono di migliori.`,
+        testo: `${intestazione(b)}\n\n${descriviFiltri(filtriDi(b))}\n\nTi mostro le prime ${PRIMI_RISULTATI} date. Poi, solo se tocchi 🔔, ripeto la ricerca e ti avviso quando ne compaiono di migliori.`,
         tastiera: [
           [
-            { text: "✅ Avvia la ricerca", callback_data: "c:ok" },
+            { text: "✅ Cerca", callback_data: "c:ok" },
             { text: "❌ Annulla", callback_data: "c:no" },
           ],
         ],
@@ -368,9 +370,54 @@ async function avvia(b: Bozza, utenteId: string, chatId: string, ctx: ContestoCe
       risultati: primi,
       notificate: primi.map(chiaveData),
       proposte: salvaProposte(r.proposte, primi),
+      // Il cron la ripete solo dopo il tocco su 🔔 (attivaMonitoraggio).
+      monitora: false,
     },
   });
   await cancellaBozza(ctx.db, utenteId);
-  await ctx.tg.modifica(chatId, b.messaggio, `✅ <b>Ricerca #${id} avviata</b>`);
-  await ctx.tg.manda(chatId, messaggioRisultati(id, b.prestazione, filtri, primi, new Set(), r.zoneInErrore), tastieraPrenota(id, primi));
+  await ctx.tg.modifica(chatId, b.messaggio, `✅ <b>Ricerca #${id} fatta</b>`);
+  await ctx.tg.manda(
+    chatId,
+    `${messaggioRisultati(id, b.prestazione, filtri, primi, new Set(), r.zoneInErrore)}\n\n${NON_MONITORATA}`,
+    tastieraRicerca(id, primi, false),
+  );
+}
+
+/** "🔔" (m:<id>): il cron ripete la ricerca da adesso. "🗑" (mx:<id>): la chiude e cancella i dati. */
+export async function gestisciMonitoraggio(q: any, utenteId: string, ctx: ContestoCerca) {
+  const [azione, n] = String(q.data ?? "").split(":");
+  const chatId = String(q.message?.chat?.id ?? "");
+  const messaggio = Number(q.message?.message_id ?? 0);
+  const c = (await leggiControlli(ctx.db, ctx.chiave, utenteId)).find((x) => x.id === Number(n));
+  // Tolti 🔔/🗑, restano i 📅 (servono finché la ricerca esiste).
+  const senzaRiga = ((q.message?.reply_markup?.inline_keyboard ?? []) as Tastiera).filter(
+    (riga) => !riga.some((p) => /^mx?:/.test(String(p.callback_data ?? ""))),
+  );
+  if (!c || c.modalita !== "cerca") {
+    await ctx.tg.rispondiPulsante(q.id, "Questa ricerca non c'è più: rifalla con /cerca");
+    await ctx.tg.pulsanti(chatId, messaggio, []);
+    return;
+  }
+  if (azione === "mx") {
+    await cancellaControllo(ctx.db, c.id);
+    await ctx.tg.rispondiPulsante(q.id, "Ricerca chiusa");
+    await ctx.tg.pulsanti(chatId, messaggio, []);
+    await ctx.tg.manda(chatId, `🗑 Ricerca #${c.id} chiusa. Ho cancellato i suoi dati (codice fiscale, tessera, ricetta).`);
+    return;
+  }
+  if (c.contesto.monitora === false) {
+    await aggiornaControllo(ctx.db, ctx.chiave, {
+      id: c.id,
+      tipo: c.tipo,
+      errori: c.errori,
+      ultimoEsito: c.ultimoEsito,
+      contesto: { ...c.contesto, monitora: true },
+    });
+  }
+  await ctx.tg.rispondiPulsante(q.id, "Monitoraggio attivo");
+  await ctx.tg.pulsanti(chatId, messaggio, senzaRiga);
+  await ctx.tg.manda(
+    chatId,
+    `🔔 Ricerca #${c.id}: la ripeto ogni 15 minuti di giorno (ogni ora di notte) e ti avviso quando compaiono date migliori. /stop ${c.id} per fermarla.`,
+  );
 }

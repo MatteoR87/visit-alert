@@ -30,6 +30,10 @@ export class TelegramFinto {
       m.tastiera = tastiera;
     }
   }
+  async pulsanti(_chatId: string | number, messageId: number, tastiera: Tastiera) {
+    const m = this.messaggi.find((x) => x.id === messageId);
+    if (m) m.tastiera = tastiera;
+  }
   async rispondiPulsante(id: string, testo?: string) {
     this.risposte.push({ id, testo });
   }

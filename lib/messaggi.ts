@@ -53,6 +53,24 @@ export function tastieraPrenota(id: number, date: DataLibera[]): Tastiera {
   return righe;
 }
 
+/**
+ * I pulsanti sotto i risultati di una ricerca: "📅 N" e, se la ricerca non è monitorata, "🔔" per farla
+ * ripetere dal cron e "🗑" per chiuderla subito.
+ */
+export function tastieraRicerca(id: number, date: DataLibera[], monitora: boolean | undefined): Tastiera {
+  const righe = tastieraPrenota(id, date);
+  if (monitora === false)
+    righe.push([
+      { text: "🔔 Avvisami di date migliori", callback_data: `m:${id}` },
+      { text: "🗑 Chiudi", callback_data: `mx:${id}` },
+    ]);
+  return righe;
+}
+
+/** Il testo sotto i risultati di una ricerca non monitorata. */
+export const NON_MONITORATA =
+  "ℹ️ Non ripeto questa ricerca. Tocca 🔔 se vuoi che la ricontrolli ogni 15 minuti di giorno (ogni ora di notte) e ti avvisi quando compaiono date migliori. Altrimenti tra un'ora cancello i dati (o subito con 🗑).";
+
 export function elencoDate(date: DataLibera[], appuntamento: Appuntamento, nuove?: Set<string>): string {
   const righe = date.slice(0, MAX_DATE).map((d, i) => riga(d, i, appuntamento, nuove));
   if (date.length > MAX_DATE) righe.push(`… e altre ${date.length - MAX_DATE}`);
@@ -146,7 +164,7 @@ export const AIUTO = [
   "<b>visit-alert</b>: cerco date su PrenotaSalute e ti avviso quando se ne liberano di migliori.",
   "",
   "<code>/avvia CODICEFISCALE CIFRE NRE</code> per una ricetta già prenotata: ti avviso quando si libera una data prima del tuo appuntamento, nella stessa struttura.",
-  "<code>/cerca CODICEFISCALE CIFRE NRE</code> per cercare una visita: scegli con i pulsanti province, periodo e fascia oraria, ti mostro le prime 10 date e ti avviso quando ne compaiono di migliori.",
+  "<code>/cerca CODICEFISCALE CIFRE NRE</code> per cercare una visita: scegli con i pulsanti province, periodo e fascia oraria, ti mostro le prime 10 date e, solo se tocchi 🔔, ti avviso quando ne compaiono di migliori.",
   "CIFRE sono le ultime 5 cifre della tessera sanitaria, NRE il numero di ricetta elettronica. Il messaggio viene cancellato subito; i dati si salvano cifrati.",
   "Facoltativo in fondo: <code>O</code> (prima visita) o <code>Z</code> (controllo), se quello trovato in automatico è sbagliato.",
   "",

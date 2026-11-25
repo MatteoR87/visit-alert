@@ -1,9 +1,16 @@
 // Comandi del bot Telegram (vedi README e AIUTO in messaggi.ts).
 import type { Client } from "@libsql/client";
-import { avviaCerca, gestisciPulsante, gestisciTesto, type ContestoCerca } from "./cerca.js";
+import { avviaCerca, gestisciMonitoraggio, gestisciPulsante, gestisciTesto, type ContestoCerca } from "./cerca.js";
 import { chiaveData, dateAnticipate, ErroreUtente, giroSito, type Tipo } from "./controllo.js";
 import { leggiDatiRicetta } from "./dati.js";
-import { cancellaControllo, leggiControlli, leggiStato, nuovoControllo, type Controllo } from "./db.js";
+import {
+  cancellaControllo,
+  DURATA_RICERCA_SINGOLA_MS,
+  leggiControlli,
+  leggiStato,
+  nuovoControllo,
+  type Controllo,
+} from "./db.js";
 import {
   AIUTO,
   descriviAppuntamento,
@@ -13,6 +20,7 @@ import {
   messaggioAnticipate,
   messaggioRisultati,
   tastieraPrenota,
+  tastieraRicerca,
 } from "./messaggi.js";
 import { controllaUno, salvaProposte, type Contesto as ContestoMonitor } from "./monitor.js";
 import { InCoda } from "./prenota.js";
@@ -102,6 +110,7 @@ async function pulsante(q: any, ctx: ContestoBot) {
   }
   const dato = String(q.data ?? "");
   if (dato.startsWith("c:")) return gestisciPulsante(q, utenteId, ctx);
+  if (dato.startsWith("m:") || dato.startsWith("mx:")) return gestisciMonitoraggio(q, utenteId, ctx);
   if (dato.startsWith("p:")) return chiediConferma(q, utenteId, ctx);
   if (dato.startsWith("pc:")) return eseguiPrenotazione(q, utenteId, ctx);
   if (dato === "px") return annullaConferma(q, ctx);
@@ -201,10 +210,12 @@ function descriviControllo(c: Controllo): string[] {
   const ultimo = `Ultimo controllo: ${quando(c.ultimoControllo)} → ${html(c.ultimoEsito ?? "-")}`;
   if (c.modalita === "cerca") {
     const prima = c.contesto.risultati[0];
+    const scade = new Date(Date.parse(c.creato) + DURATA_RICERCA_SINGOLA_MS).toISOString();
     return [
       `<b>#${c.id}</b> 🔎 Ricerca: ${html(c.contesto.prestazione)}`,
       descriviFiltri(c.contesto.filtri),
       `Prima data trovata: ${prima ? `${formatoData(prima.data)}, ${html(prima.presidio.descrizione)}` : "nessuna"}`,
+      c.contesto.monitora === false ? `⏸ Non monitorata: dati cancellati alle ${quando(scade)} (🔔 sotto i risultati per monitorarla)` : "🔔 Monitorata dal cron",
       ultimo,
     ];
   }
@@ -263,7 +274,7 @@ async function date(argomenti: string[], chatId: string, utenteId: string, ctx: 
     await ctx.tg.manda(
       chatId,
       messaggioRisultati(aggiornato.id, k.prestazione, k.filtri, k.risultati),
-      tastieraPrenota(aggiornato.id, k.risultati),
+      tastieraRicerca(aggiornato.id, k.risultati, k.monitora),
     );
     return;
   }

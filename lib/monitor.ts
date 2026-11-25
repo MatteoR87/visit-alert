@@ -22,7 +22,9 @@ import {
 import {
   aggiornaControllo,
   cancellaControllo,
+  DURATA_RICERCA_SINGOLA_MS,
   leggiControlli,
+  monitorato,
   pulisciBozze,
   type Controllo,
   type ControlloAnticipa,
@@ -37,6 +39,7 @@ import {
   messaggioRisultati,
   PRIMI_RISULTATI,
   tastieraPrenota,
+  tastieraRicerca,
 } from "./messaggi.js";
 import { InCoda } from "./prenota.js";
 import { html, type Telegram } from "./telegram.js";
@@ -188,7 +191,7 @@ async function controllaCerca(c: ControlloCerca, ctx: Contesto): Promise<Esito> 
     await ctx.tg.manda(
       c.chatId,
       messaggioRisultati(c.id, c.contesto.prestazione, c.contesto.filtri, primi, nuove),
-      tastieraPrenota(c.id, primi),
+      tastieraRicerca(c.id, primi, c.contesto.monitora),
     );
 
   await aggiornaControllo(ctx.db, ctx.chiave, {
@@ -211,7 +214,12 @@ async function controllaCerca(c: ControlloCerca, ctx: Contesto): Promise<Esito> 
 export async function giroDiControllo(ctx: Contesto & { limite: number }) {
   await pulisciBozze(ctx.db).catch((e) => console.warn(JSON.stringify({ bozze: (e as Error).message })));
   const conteggi: Record<Esito, number> = { ok: 0, notificato: 0, coda: 0, errore: 0, finito: 0 };
-  const controlli = await leggiControlli(ctx.db, ctx.chiave);
+  // Le ricerche senza monitoraggio non si ripetono; passata la loro durata si cancellano (dati sanitari).
+  const controlli: Controllo[] = [];
+  for (const c of await leggiControlli(ctx.db, ctx.chiave)) {
+    if (monitorato(c)) controlli.push(c);
+    else if (Date.now() - Date.parse(c.creato) > DURATA_RICERCA_SINGOLA_MS) await cancellaControllo(ctx.db, c.id);
+  }
   let saltati = 0;
   for (const [i, c] of controlli.entries()) {
     if (Date.now() > ctx.limite) {

@@ -61,7 +61,18 @@ export type ContestoCerca = {
   /** Chiavi dei risultati già mandati. */
   notificate: string[];
   proposte?: ProposteSalvate;
+  /**
+   * false: ricerca fatta una volta sola, il cron non la ripete e dopo DURATA_RICERCA_SINGOLA_MS si cancella
+   * (finché non si tocca 🔔). Assente (ricerche della prima versione) vale true.
+   */
+  monitora?: boolean;
 };
+
+/** Quanto resta salvata una ricerca senza monitoraggio (per poter prenotare dai suoi pulsanti). */
+export const DURATA_RICERCA_SINGOLA_MS = 60 * 60_000;
+
+/** Se il cron deve ripetere questo controllo. */
+export const monitorato = (c: Controllo) => c.modalita !== "cerca" || c.contesto.monitora !== false;
 
 type Comune = {
   id: number;

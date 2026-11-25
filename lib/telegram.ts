@@ -60,6 +60,15 @@ export class Telegram {
     }
   }
 
+  /** Cambia solo i pulsanti di un messaggio (il testo resta); gli errori si ignorano. */
+  async pulsanti(chatId: string | number, messageId: number, tastiera: Tastiera) {
+    await this.chiama("editMessageReplyMarkup", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: tastiera },
+    }).catch(() => null);
+  }
+
   /** Toglie la clessidra dal pulsante toccato, con un avviso breve facoltativo. */
   async rispondiPulsante(id: string, testo?: string) {
     await this.chiama("answerCallbackQuery", { callback_query_id: id, ...(testo ? { text: testo } : {}) }).catch(() => null);

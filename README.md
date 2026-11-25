@@ -3,8 +3,8 @@
 Bot Telegram per [PrenotaSalute](https://prenotasalute.regione.lombardia.it/prenotaonline/) (Regione Lombardia):
 
 - **`/avvia`**: avvisa quando si libera una data **prima** dell'appuntamento già prenotato, **nella stessa struttura**;
-- **`/cerca`**: cerca una visita nelle zone, nel periodo e nella fascia oraria scelti, mostra le **prime 10 date**
-  e avvisa quando ne compaiono di migliori;
+- **`/cerca`**: cerca una visita nelle zone, nel periodo e nella fascia oraria scelti e mostra le **prime 10
+  date**; solo se lo chiedi (🔔) ripete la ricerca e avvisa quando ne compaiono di migliori;
 - **📅 Prenota**: sotto le date, un pulsante per prenotarle, **solo dopo una conferma esplicita** (vedi
   "Prenotazione").
 
@@ -91,12 +91,18 @@ del sito, poi chiede con i pulsanti:
    fascia (estremi inclusi). Al sito si chiede mattina e/o pomeriggio secondo le fasce (il confine non è
    documentato, si chiede largo) e l'orario esatto si filtra dopo. Le ricerche salvate con la prima versione
    (una sola fascia `oraDa`/`oraA`) si leggono ancora;
-5. riepilogo e **✅ Avvia**: ricerca in tutte le zone, prime 10 date in ordine e salvataggio come controllo
-   in modalità `cerca`.
+5. riepilogo e **✅ Cerca**: ricerca in tutte le zone e prime 10 date in ordine, con i pulsanti 📅 per
+   prenotare e, sotto, **🔔 Avvisami di date migliori** e **🗑 Chiudi**.
+
+La ricerca si salva (cifrata) come controllo in modalità `cerca` **non monitorato** (`contesto.monitora: false`):
+i dati servono ai pulsanti 📅, ma **il cron non la ripete**. Senza 🔔 si cancella dopo un'ora (al primo giro del
+cron), con 🗑 subito; `/stato` la mostra come ⏸ con l'ora di cancellazione e `/date N` la rifà una volta.
+Solo dopo **🔔** il cron la ripete: arriva un messaggio con le prime 10 date (🆕 le nuove) quando ce n'è una mai
+mandata e, se l'elenco era già di 10, migliore dell'ultima. Le ricerche salvate prima di questa modifica (senza
+`monitora`) restano monitorate.
 
 La procedura sta nella tabella `bozze` (cifrata) e scade dopo un'ora; i pulsanti di un passo vecchio non fanno
-nulla. A ogni giro del cron la ricerca si ripete: arriva un messaggio con le prime 10 date (🆕 le nuove) quando
-ce n'è una mai mandata e, se l'elenco era già di 10, migliore dell'ultima. La ricetta già prenotata si può
+nulla. La ricetta già prenotata si può
 cercare lo stesso (per trovare di meglio altrove); se invece viene prenotata **dopo** l'avvio della ricerca, la
 ricerca si ferma e i dati si cancellano.
 
@@ -110,7 +116,7 @@ al primo `/avvia`. `/avvia … O` o `/avvia … Z` lo forza.
 | Comando | Cosa fa |
 |---|---|
 | `/avvia CODICEFISCALE CIFRE NRE [O\|Z]` | avvia un controllo. CIFRE = ultime 5 cifre della tessera sanitaria. Il messaggio si **cancella subito** (anche se sbagliato o da chi non è abilitato); il bot fa un giro e risponde con l'appuntamento trovato e, se ci sono già, le date anticipate. Un nuovo `/avvia` con lo stesso NRE sostituisce il precedente |
-| `/cerca CODICEFISCALE CIFRE NRE [O\|Z]` | ricerca nuova con procedura guidata a pulsanti (vedi sopra). Messaggio cancellato subito |
+| `/cerca CODICEFISCALE CIFRE NRE [O\|Z]` | ricerca nuova con procedura guidata a pulsanti (vedi sopra): una volta sola, monitorata solo dopo 🔔. Messaggio cancellato subito |
 | `/stato` | stato del cron (🟢/🟠/🔴) e dei propri controlli e ricerche: appuntamento o filtri, prima data, ultimo esito |
 | `/date [N]` | controlla adesso e mostra le date (anticipate, o le prime 10 della ricerca) |
 | `/stop [N]` | ferma il controllo o la ricerca e **cancella** i suoi dati |

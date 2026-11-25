@@ -16,7 +16,7 @@ import {
 import { leggiFasce, leggiOrario, leggiPeriodo, piuGiorni } from "../lib/dati.js";
 import { descriviFiltri } from "../lib/messaggi.js";
 import { leggiControlli, preparaDb } from "../lib/db.js";
-import { controllaUno, nuoveDaNotificare, type CercaSito } from "../lib/monitor.js";
+import { controllaUno, giroDiControllo, nuoveDaNotificare, type CercaSito } from "../lib/monitor.js";
 import {
   appuntamentoSito,
   CF,
@@ -285,7 +285,8 @@ test("/cerca: procedura completa a pulsanti e testo, salvataggio cifrato e prime
   assert.match(tg.ultimo, /Ricerca #1/);
   assert.match(tg.ultimo, /Le prime 10 date libere/);
   assert.equal((tg.ultimo.match(/^\d+\. /gm) ?? []).length, 10);
-  assert.equal(tg.messaggi.at(-1)!.tastiera!.flat().length, 10); // 📅 1 … 📅 10
+  assert.equal(tg.messaggi.at(-1)!.tastiera!.flat().length, 12); // 📅 1 … 📅 10, 🔔, 🗑
+  assert.match(tg.ultimo, /Non ripeto questa ricerca/);
 
   const [c] = await leggiControlli(db, CHIAVE, UTENTE);
   assert.equal(c.modalita, "cerca");
@@ -363,6 +364,44 @@ test("giro della ricerca: avvisa per una data migliore, tace per una peggiore, s
   assert.equal(await controllaUno(c, ctx), "finito");
   assert.match(tg.ultimo, /ora è prenotata/);
   assert.equal((await leggiControlli(db, CHIAVE)).length, 0);
+});
+
+test("ricerca senza 🔔: il cron non la ripete e dopo un'ora la cancella; con 🔔 sì; 🗑 la chiude", async () => {
+  const { db, tg, scrivi, tocca, ctx, ricerche } = await ambiente({ tipo: "O" });
+  const fai = async () => {
+    await scrivi(`/cerca ${CF} ${CIFRE} ${NRE}`);
+    await tocca("c:z:012%");
+    await tocca("c:z:ok");
+    await tocca("c:d:0");
+    await tocca("c:o:ok");
+    await tocca("c:ok");
+    return tg.conPulsanti!.id;
+  };
+  const giro = () => giroDiControllo({ ...ctx, limite: Date.now() + 60_000 });
+
+  const risultati = await fai();
+  assert.equal((await giro()).controlli, 0);
+  assert.equal(ricerche.length, 1); // il cron non ha cercato
+  assert.equal((await leggiControlli(db, CHIAVE)).length, 1); // ma resta, per i pulsanti 📅
+
+  await tocca("m:1", risultati);
+  assert.match(tg.ultimo, /🔔 Ricerca #1: la ripeto/);
+  assert.equal((await giro()).controlli, 1);
+  assert.equal(ricerche.length, 2);
+
+  // Una seconda ricerca, non monitorata, vecchia di due ore: il giro la cancella.
+  await fai();
+  await db.execute({ sql: "UPDATE controlli SET creato = ? WHERE id = 2", args: [new Date(Date.now() - 2 * 3600_000).toISOString()] });
+  await giro();
+  assert.deepEqual((await leggiControlli(db, CHIAVE)).map((c) => c.id), [1]);
+
+  // 🗑 su una terza.
+  const terza = await fai();
+  await tocca("mx:3", terza);
+  assert.match(tg.ultimo, /Ricerca #3 chiusa/);
+  assert.deepEqual((await leggiControlli(db, CHIAVE)).map((c) => c.id), [1]);
+  await tocca("m:3", terza);
+  assert.match(tg.risposte.at(-1)!.testo ?? "", /non c'è più/);
 });
 
 test("/stato e /stop mostrano anche le ricerche", async () => {

@@ -26,6 +26,10 @@ async function giro(amb: Ambiente, inizio: number) {
   }
 }
 
+export function giroFallito(r: object): boolean {
+  return typeof (r as { errore?: unknown }).errore === "string";
+}
+
 async function controlla(request: Request) {
   const inizio = Date.now();
   let amb;
@@ -40,7 +44,8 @@ async function controlla(request: Request) {
   const intestazioni = { "Cache-Control": "no-store" };
   if (new URL(request.url).searchParams.get("attendi") === "1") {
     const r = await lavoro;
-    return Response.json(r, { status: "errore" in r ? 500 : 200, headers: intestazioni });
+    // Nel riepilogo `errore` è il numero di controlli in errore; solo un giro fallito ha un messaggio.
+    return Response.json(r, { status: giroFallito(r) ? 500 : 200, headers: intestazioni });
   }
   waitUntil(lavoro);
   return Response.json({ avviato: true }, { status: 202, headers: intestazioni });

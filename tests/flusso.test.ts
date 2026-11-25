@@ -201,6 +201,13 @@ test("/id risponde a tutti; gli altri comandi solo agli abilitati", async () => 
   assert.match(tg.ultimo, /Non sei abilitato/);
 });
 
+test("/api/controlla?attendi=1: 500 solo per un giro fallito, non per il conteggio degli errori", async () => {
+  const { giroFallito } = await import("../api/controlla.js");
+  assert.equal(giroFallito({ controlli: 1, ok: 1, errore: 0 }), false);
+  assert.equal(giroFallito({ controlli: 2, ok: 1, errore: 1 }), false);
+  assert.equal(giroFallito({ errore: "Turso non risponde" }), true);
+});
+
 test("soglie del cron: più larghe di notte", () => {
   assert.deepEqual(sogliaCron(new Date("2026-11-24T02:00:00Z")), { giallo: 75, rosso: 130 }); // 03:00 in Italia
   assert.deepEqual(sogliaCron(new Date("2026-11-24T12:00:00Z")), { giallo: 25, rosso: 60 });

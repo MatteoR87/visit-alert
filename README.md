@@ -33,6 +33,14 @@ appuntamenti: null), tipoPrestazione, recapiti}`; `appuntamento` è quello della
 `differita` e `ricetta: {iup, iurp, modulo: {id}}` (Appuntamento.newFrom). `richiesta` è il codice che lega la
 data alla ricerca appena fatta: per questo si rifà la ricerca.
 
+**Date trattenute.** Ogni ricerca di disponibilità trattiene per qualche minuto (più di 5, al massimo circa 15:
+prova del 25/11/2026 con ricerche a 0 s, 22 s, 5 e 10 minuti) la **prima** data che propone: una ricerca subito
+dopo, del bot o di chiunque sul sito, non la vede; le altre date restano visibili. Quindi la data migliore di una
+notifica può non comparire sul sito per qualche minuto, e la ricerca fatta al momento di prenotare può non
+vederla. Per questo i giri e `/avvia`/`/cerca` salvano (cifrate) le disponibilità grezze delle prime 10 date con
+l'ora (`contesto.proposte`): se la ricerca nuova non trova la data e la proposta ha meno di 20 minuti, si conferma
+con quella (la sua `richiesta` è quella che la trattiene). Se il sito la rifiuta non cambia nulla.
+
 Dopo una prenotazione riuscita la ricetta **non** si sblocca (il sito fa lo stesso); dopo un rifiuto del sito sì.
 Se la conferma non riceve risposta (rete), non si sblocca e si invita a controllare su PrenotaSalute.
 

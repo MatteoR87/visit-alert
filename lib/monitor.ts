@@ -9,8 +9,10 @@ import {
   dateAnticipate,
   ErroreUtente,
   giroSito,
+  proposteDi,
   type DataLibera,
   type DatiRicetta,
+  type Proposte,
   type EsitoRicerca,
   type EsitoSito,
   type Filtri,
@@ -25,8 +27,10 @@ import {
   type Controllo,
   type ControlloAnticipa,
   type ControlloCerca,
+  type ProposteSalvate,
 } from "./db.js";
 import {
+  DATE_PRENOTABILI,
   descriviAppuntamento,
   formatoData,
   messaggioAnticipate,
@@ -39,6 +43,12 @@ import { html, type Telegram } from "./telegram.js";
 
 /** Dopo quanti errori di fila si avvisa (e poi si riavvisa quando torna a funzionare). */
 export const ERRORI_PER_AVVISO = 3;
+
+/** Le proposte grezze delle date prenotabili da un messaggio (le prime DATE_PRENOTABILI), con l'ora. */
+export function salvaProposte(p: Proposte | undefined, date: DataLibera[]): ProposteSalvate | undefined {
+  if (!p) return undefined;
+  return { quando: new Date().toISOString(), singole: proposteDi(p, date.slice(0, DATE_PRENOTABILI)) };
+}
 
 export type GiroSito = (dati: DatiRicetta, opz: OpzioniGiro) => Promise<EsitoSito>;
 export type CercaSito = (dati: DatiRicetta, tipo: Tipo, filtri: Filtri) => Promise<EsitoRicerca>;
@@ -129,6 +139,7 @@ async function controllaAnticipa(c: ControlloAnticipa, ctx: Contesto): Promise<E
       notificate: anticipate.map(chiaveData),
       anticipate,
       primaData: r.date.find((d) => d.presidio.codice === r.appuntamento!.presidio.codice) ?? null,
+      proposte: salvaProposte(r.proposte, anticipate),
     },
   });
   return nuove.size > 0 ? "notificato" : "ok";
@@ -190,6 +201,7 @@ async function controllaCerca(c: ControlloCerca, ctx: Contesto): Promise<Esito> 
       appuntamentoIniziale: r.appuntamento?.data ?? c.contesto.appuntamentoIniziale,
       risultati: primi,
       notificate: primi.map(chiaveData),
+      proposte: salvaProposte(r.proposte, primi),
     },
   });
   return nuove.size > 0 ? "notificato" : "ok";

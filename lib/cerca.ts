@@ -28,7 +28,7 @@ import {
   PRIMI_RISULTATI,
   tastieraPrenota,
 } from "./messaggi.js";
-import type { AnteprimaSito, CercaSito } from "./monitor.js";
+import { salvaProposte, type AnteprimaSito, type CercaSito } from "./monitor.js";
 import { InCoda } from "./prenota.js";
 import { html, type Tastiera, type Telegram } from "./telegram.js";
 
@@ -367,6 +367,7 @@ async function avvia(b: Bozza, utenteId: string, chatId: string, ctx: ContestoCe
       appuntamentoIniziale: r.appuntamento?.data ?? null,
       risultati: primi,
       notificate: primi.map(chiaveData),
+      proposte: salvaProposte(r.proposte, primi),
     },
   });
   await cancellaBozza(ctx.db, utenteId);

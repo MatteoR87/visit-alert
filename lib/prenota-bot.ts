@@ -2,11 +2,11 @@
 //   "📅 N" (p:<id>:<data>:<presidio>) → riepilogo e avvertenze, con "✅ Prenota" (pc:…) e "❌ No" (px)
 //   "✅ Prenota" → prenotaData (o, in modalità prova, solo la preparazione) → esito.
 import type { Client } from "@libsql/client";
-import type { DataLibera } from "./controllo.js";
+import { chiaveData, type DataLibera } from "./controllo.js";
 import { aggiornaControllo, cancellaControllo, leggiControlli, leggiStato, scriviStato, type Controllo } from "./db.js";
 import { descriviAppuntamento, formatoData } from "./messaggi.js";
 import { InCoda } from "./prenota.js";
-import { prenotaData, type Bersaglio, type EsitoPrenotazione } from "./prenotazione.js";
+import { prenotaData, type Bersaglio, type EsitoPrenotazione, type Riserva } from "./prenotazione.js";
 import { html, type Telegram } from "./telegram.js";
 
 export type Prenota = typeof prenotaData;
@@ -35,6 +35,15 @@ function leggiDato(dato: string): { id: number; bersaglio: Bersaglio } | null {
 function trovaData(c: Controllo, b: Bersaglio): DataLibera | null {
   const elenco = c.modalita === "cerca" ? c.contesto.risultati : c.contesto.anticipate;
   return elenco.find((d) => d.data === b.data && d.presidio.codice === b.presidio) ?? null;
+}
+
+/** La proposta salvata dall'ultimo giro per questa data, se c'è. */
+function riservaDi(c: Controllo, b: Bersaglio, d: DataLibera | null): Riserva | null {
+  const p = c.contesto.proposte;
+  if (!p) return null;
+  const chiave = d ? chiaveData(d) : Object.keys(p.singole).find((k) => k.startsWith(`${b.data}|${b.presidio}|`));
+  const singola = chiave ? p.singole[chiave] : undefined;
+  return singola ? { singola, quando: p.quando } : null;
 }
 
 /** La data dell'appuntamento che il sito annullerà prenotando, se c'è. */
@@ -122,6 +131,7 @@ export async function eseguiPrenotazione(q: any, utenteId: string, ctx: Contesto
     if (zone.length === 0) throw new Error("zona del controllo sconosciuta: aspetta il prossimo giro e riprova");
     r = await (ctx.prenota ?? prenotaData)(c.dati, c.tipo, zone, { ...letto.bersaglio, agenda: d?.agenda.codice ?? null }, {
       reale: ctx.prenotazioneReale,
+      riserva: riservaDi(c, letto.bersaglio, d),
     });
   } catch (e) {
     const testo =
@@ -147,7 +157,9 @@ export async function eseguiPrenotazione(q: any, utenteId: string, ctx: Contesto
       chatId,
       messaggio,
       [
-        "🧪 <b>Prova riuscita</b>: la data è ancora libera e la richiesta di prenotazione è pronta.",
+        r.trattenuta
+          ? "🧪 <b>Prova riuscita</b>: la data è trattenuta dall'ultima ricerca del bot e la richiesta di prenotazione è pronta con quella proposta."
+          : "🧪 <b>Prova riuscita</b>: la data è ancora libera e la richiesta di prenotazione è pronta.",
         "",
         descriviAppuntamento(r.appuntamento).replace("Appuntamento attuale", "Data"),
         "",

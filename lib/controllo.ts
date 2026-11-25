@@ -27,6 +27,8 @@ export type EsitoSito = {
   date: DataLibera[];
   tipo: Tipo;
   zona: Zona | null;
+  /** Le disponibilità grezze, per prenotare una data trattenuta da questa ricerca. */
+  proposte?: Proposte;
 };
 
 /** Una fascia oraria in minuti dalla mezzanotte, estremi inclusi. */
@@ -69,6 +71,8 @@ export type EsitoRicerca = {
   date: DataLibera[];
   /** Zone in cui la ricerca è fallita (le altre valgono comunque). */
   zoneInErrore: string[];
+  /** Le disponibilità grezze, per prenotare una data trattenuta da questa ricerca. */
+  proposte?: Proposte;
 };
 
 /** Errore da far vedere all'utente così com'è (dati sbagliati, ricetta non trovata…). */
@@ -261,6 +265,28 @@ export function chiaveData(d: DataLibera) {
   return `${d.data}|${d.presidio.codice}|${d.agenda.codice}`;
 }
 
+/**
+ * Le disponibilità grezze del sito per chiave (chiaveData), con il codice "richiesta". Ogni ricerca trattiene per
+ * 5-15 minuti la sua prima data (provato il 25/11/2026): una ricerca subito dopo non la vede, ma la richiesta
+ * della ricerca che l'ha trovata la può ancora prenotare.
+ */
+export type Proposte = Record<string, unknown>;
+
+export function leggiProposte(r: any): Proposte {
+  const out: Proposte = {};
+  for (const d of r?.singole ?? []) {
+    const a = d?.appuntamento;
+    if (!a || typeof a.data !== "string" || !d.richiesta) continue;
+    out[chiaveData({ data: a.data, presidio: luogo(a.unitaErogante?.presidio), agenda: luogo(a.agenda), unita: null })] = d;
+  }
+  return out;
+}
+
+/** Le proposte delle sole date indicate (per salvarne poche). */
+export function proposteDi(p: Proposte, date: DataLibera[]): Proposte {
+  return Object.fromEntries(date.map(chiaveData).filter((k) => k in p).map((k) => [k, p[k]]));
+}
+
 /** Le regole del sito per capire dalla ricetta se è prima visita o controllo; null se il sito lo chiederebbe. */
 export function tipoDaRicetta(ricetta: any): Tipo | null {
   if (ricetta?.tipoPrestazione) return ricetta.tipoPrestazione as Tipo;
@@ -348,21 +374,23 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
     const appuntamento = appuntamentoSemplice(grezzo);
 
     const zona = opz.zona ?? (await trovaZona(s, grezzo));
-    const cerca = async (tipo: Tipo) =>
-      leggiDisponibilita(
-        await s.chiama(
-          "pgpcitt_ricerca_disponibilita",
-          criteriDisponibilita({
-            codiceFiscale: dati.codiceFiscale,
-            zona,
-            ricetta,
-            tipo,
-            regimeErogazione: grezzo.regimeErogazione ?? null,
-            recapiti: recapiti(login),
-            vincoli: { dal: oggiRoma(opz.ora), al: null, mattina: true, pomeriggio: true },
-          }),
-        ),
+    let proposte: Proposte = {};
+    const cerca = async (tipo: Tipo) => {
+      const r = await s.chiama(
+        "pgpcitt_ricerca_disponibilita",
+        criteriDisponibilita({
+          codiceFiscale: dati.codiceFiscale,
+          zona,
+          ricetta,
+          tipo,
+          regimeErogazione: grezzo.regimeErogazione ?? null,
+          recapiti: recapiti(login),
+          vincoli: { dal: oggiRoma(opz.ora), al: null, mattina: true, pomeriggio: true },
+        }),
       );
+      proposte = leggiProposte(r);
+      return leggiDisponibilita(r);
+    };
 
     let tipo = opz.tipo ?? tipoDaRicetta(ricetta);
     let date: DataLibera[];
@@ -374,15 +402,16 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
       const stessaAgenda = (l: DataLibera[]) => l.some((d) => d.agenda.codice === appuntamento.agenda.codice);
       tipo = "O";
       date = await cerca("O");
+      const proposteO = proposte;
       if (!stessaAgenda(date)) {
         const z = await cerca("Z");
         if (stessaAgenda(z)) {
           tipo = "Z";
           date = z;
-        }
+        } else proposte = proposteO;
       }
     }
-    return { appuntamento, date, tipo, zona };
+    return { appuntamento, date, tipo, zona, proposte };
   });
 }
 
@@ -448,6 +477,7 @@ export async function cercaNuova(
       ...fasceSito(fasceDi(filtri)),
     };
     const tutte: DataLibera[] = [];
+    const proposte: Proposte = {};
     const zoneInErrore: string[] = [];
     for (const zona of filtri.zone) {
       try {
@@ -464,6 +494,7 @@ export async function cercaNuova(
           }),
         );
         tutte.push(...leggiDisponibilita(r));
+        Object.assign(proposte, leggiProposte(r));
       } catch (e) {
         if (e instanceof InCoda) throw e;
         zoneInErrore.push(String(zona.descrizione ?? zona.codice));
@@ -476,6 +507,6 @@ export async function cercaNuova(
       .filter((d) => rispettaFiltri(d, filtri, oggi))
       .filter((d) => (viste.has(chiaveData(d)) ? false : (viste.add(chiaveData(d)), true)))
       .sort((a, b) => a.data.localeCompare(b.data) || a.presidio.descrizione.localeCompare(b.presidio.descrizione));
-    return { appuntamento: grezzo ? appuntamentoSemplice(grezzo) : null, date, zoneInErrore };
+    return { appuntamento: grezzo ? appuntamentoSemplice(grezzo) : null, date, zoneInErrore, proposte };
   });
 }

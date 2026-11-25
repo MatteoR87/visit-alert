@@ -3,7 +3,10 @@
 // contatori: dati sanitari, appuntamento, filtri e date sono cifrati con CHIAVE_CIFRATURA.
 import type { Client } from "@libsql/client";
 import { cifraJson, decifraJson } from "./cifratura.js";
-import type { Appuntamento, DataLibera, DatiRicetta, Filtri, Tipo, Zona } from "./controllo.js";
+import type { Appuntamento, DataLibera, DatiRicetta, Filtri, Proposte, Tipo, Zona } from "./controllo.js";
+
+/** Le disponibilità grezze delle date mostrate (le prime 10), con l'ora della ricerca che le ha trovate. */
+export type ProposteSalvate = { quando: string; singole: Proposte };
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS controlli (
@@ -44,6 +47,7 @@ export type ContestoAnticipa = {
   anticipate: DataLibera[];
   /** Prima data libera nella struttura all'ultimo giro (anche se dopo l'appuntamento). */
   primaData: DataLibera | null;
+  proposte?: ProposteSalvate;
 };
 
 /** Ricerca nuova con filtri. */
@@ -56,6 +60,7 @@ export type ContestoCerca = {
   risultati: DataLibera[];
   /** Chiavi dei risultati già mandati. */
   notificate: string[];
+  proposte?: ProposteSalvate;
 };
 
 type Comune = {

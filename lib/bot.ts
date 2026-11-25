@@ -14,7 +14,7 @@ import {
   messaggioRisultati,
   tastieraPrenota,
 } from "./messaggi.js";
-import { controllaUno, type Contesto as ContestoMonitor } from "./monitor.js";
+import { controllaUno, salvaProposte, type Contesto as ContestoMonitor } from "./monitor.js";
 import { InCoda } from "./prenota.js";
 import { annullaConferma, chiediConferma, eseguiPrenotazione, type ContestoPrenota } from "./prenota-bot.js";
 import { html } from "./telegram.js";
@@ -151,7 +151,14 @@ async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx:
     utenteId,
     dati,
     tipo: r.tipo,
-    contesto: { appuntamento: r.appuntamento, zona: r.zona, notificate: anticipate.map(chiaveData), anticipate, primaData },
+    contesto: {
+      appuntamento: r.appuntamento,
+      zona: r.zona,
+      notificate: anticipate.map(chiaveData),
+      anticipate,
+      primaData,
+      proposte: salvaProposte(r.proposte, anticipate),
+    },
   });
 
   const righe = [

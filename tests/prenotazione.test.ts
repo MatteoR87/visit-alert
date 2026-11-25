@@ -107,6 +107,56 @@ test("conferma senza risposta (rete): errore che invita a controllare, e niente 
   assert.ok(!destinazioni(chiamate).includes("pgpcitt_sblocca_ricetta_elettronica"));
 });
 
+test("data trattenuta dall'ultima ricerca: con una proposta recente si conferma quella, se vecchia no", async () => {
+  const proposta = singola("20270402083000", "R-VECCHIA");
+  const ora = new Date("2026-11-25T10:00:00Z");
+  const bersaglio = { data: "20270402083000", presidio: PRESIDIO.codice, agenda: AGENDA.codice };
+
+  const recente = sito({ pgpcitt_conferma_disponibilita: () => ({ disponibilita: [{ appuntamento: appuntamentoSito("20270402") }] }) });
+  const r = await prenotaData(dati, "O", [ZONA], bersaglio, {
+    fetch: recente.f,
+    reale: true,
+    ora,
+    riserva: { singola: proposta, quando: "2026-11-25T09:50:00Z" },
+  });
+  assert.equal(r.esito, "prenotato");
+  assert.equal(r.esito === "prenotato" && r.trattenuta, true);
+  assert.equal(recente.chiamate.at(-1)!.arg.disponibilita[0].richiesta, "R-VECCHIA");
+
+  const vecchia = sito();
+  const v = await prenotaData(dati, "O", [ZONA], bersaglio, {
+    fetch: vecchia.f,
+    reale: true,
+    ora,
+    riserva: { singola: proposta, quando: "2026-11-25T09:30:00Z" },
+  });
+  assert.equal(v.esito, "non-disponibile");
+  assert.ok(!destinazioni(vecchia.chiamate).includes("pgpcitt_conferma_disponibilita"));
+
+  // Una proposta di un'altra data non vale.
+  const altra = sito();
+  const a = await prenotaData(dati, "O", [ZONA], bersaglio, {
+    fetch: altra.f,
+    reale: false,
+    ora,
+    riserva: { singola: singola("20270403083000", "R9"), quando: "2026-11-25T09:55:00Z" },
+  });
+  assert.equal(a.esito, "non-disponibile");
+});
+
+test("il giro salva (cifrate) le proposte delle prime date, con l'ora", async () => {
+  const { leggiProposte, proposteDi } = await import("../lib/controllo.js");
+  const { salvaProposte } = await import("../lib/monitor.js");
+  const r = { singole: [singola("20270405083000", "R0"), singola("20270410083000", "R1"), { appuntamento: { data: "x" } }] };
+  const p = leggiProposte(r);
+  assert.deepEqual(Object.keys(p), [`20270405083000|${PRESIDIO.codice}|${AGENDA.codice}`, `20270410083000|${PRESIDIO.codice}|${AGENDA.codice}`]);
+  const una = [{ data: "20270410083000", presidio: { codice: PRESIDIO.codice, descrizione: "" }, agenda: { codice: AGENDA.codice, descrizione: "" }, unita: null }];
+  assert.deepEqual(Object.keys(proposteDi(p, una)), [`20270410083000|${PRESIDIO.codice}|${AGENDA.codice}`]);
+  const s = salvaProposte(p, una)!;
+  assert.ok(Date.now() - Date.parse(s.quando) < 5000);
+  assert.equal((s.singole as any)[`20270410083000|${PRESIDIO.codice}|${AGENDA.codice}`].richiesta, "R1");
+});
+
 test("log della prova: valori mascherati salvo codici e date", () => {
   const m = strutturaMascherata({ codiceFiscale: CF, tipoPrestazione: "O", x: { data: "20270410083000", nome: "Mario" }, n: 3 });
   assert.deepEqual(m, { codiceFiscale: "<s:16>", tipoPrestazione: "O", x: { data: "20270410083000", nome: "<s:5>" }, n: 3 });
@@ -127,8 +177,8 @@ async function ambiente(opz: { reale: boolean; modalita?: "anticipa" | "cerca"; 
     (async (...a) => {
       chiamate.push(a);
       return a[4].reale
-        ? { esito: "prenotato", appuntamenti: [{ ...attuale, data: "20270410083000" }], codici: ["CUP123"], importo: "0,00" }
-        : { esito: "prova", appuntamento: { ...attuale, data: "20270410083000" }, richiesta: {} };
+        ? { esito: "prenotato", appuntamenti: [{ ...attuale, data: "20270410083000" }], codici: ["CUP123"], importo: "0,00", trattenuta: false }
+        : { esito: "prova", appuntamento: { ...attuale, data: "20270410083000" }, richiesta: {}, trattenuta: false };
     });
   const id =
     opz.modalita === "cerca"

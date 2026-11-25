@@ -27,11 +27,18 @@ import { ErrorePrenota, type OpzioniSessione } from "./prenota.js";
 export type Bersaglio = { data: string; presidio: string; agenda?: string | null };
 
 export type EsitoPrenotazione =
-  | { esito: "prenotato"; appuntamenti: Appuntamento[]; codici: string[]; importo: string | null }
-  | { esito: "prova"; appuntamento: Appuntamento; richiesta: unknown }
+  | { esito: "prenotato"; appuntamenti: Appuntamento[]; codici: string[]; importo: string | null; trattenuta: boolean }
+  | { esito: "prova"; appuntamento: Appuntamento; richiesta: unknown; trattenuta: boolean }
   | { esito: "non-disponibile" };
 
-export type OpzioniPrenotazione = OpzioniSessione & { reale: boolean; ora?: Date };
+/**
+ * La disponibilità grezza della data, dall'ultima ricerca che l'ha trovata. Se la ricerca nuova non la vede (la
+ * ricerca di prima la trattiene ancora) e non è più vecchia di DURATA_PROPOSTA_MS, si conferma con questa.
+ */
+export type Riserva = { singola: any; quando: string };
+export const DURATA_PROPOSTA_MS = 20 * 60_000;
+
+export type OpzioniPrenotazione = OpzioniSessione & { reale: boolean; ora?: Date; riserva?: Riserva | null };
 
 /** L'appuntamento della disponibilità come lo manda il sito (Appuntamento.newFrom): le date restano stringhe. */
 function appuntamentoPerConferma(a: any) {
@@ -118,27 +125,9 @@ export async function prenotaData(
     const { s, login, ricetta } = sess;
     const regime =
       (ricetta?.appuntamenti?.singoli ?? []).find((x: any) => !x.annullatoIl)?.regimeErogazione ?? null;
-    for (const zona of zone) {
-      const r: any = await s.chiama(
-        "pgpcitt_ricerca_disponibilita",
-        criteriDisponibilita({
-          codiceFiscale: dati.codiceFiscale,
-          zona,
-          ricetta,
-          tipo,
-          regimeErogazione: regime,
-          recapiti: recapiti(login),
-          // La stessa ricerca dei giri: con un limite "al" il sito propone date diverse (provato il 25/11/2026).
-          vincoli: { dal: oggiRoma(opz.ora), al: null, mattina: true, pomeriggio: true },
-        }),
-      );
-      const candidate = (r?.singole ?? []).filter((x: any) => corrisponde(x?.appuntamento, bersaglio));
-      if (candidate.length === 0)
-        console.log(JSON.stringify({ prenota_non_trovata: { zona: zona.codice, date: (r?.singole ?? []).length } }));
-      const singola =
-        candidate.find((x: any) => !bersaglio.agenda || x.appuntamento?.agenda?.codice === bersaglio.agenda) ?? candidate[0];
-      if (!singola) continue;
 
+    /** Prova o conferma di una disponibilità singola. */
+    const concludi = async (zona: Zona, singola: any, trattenuta: boolean): Promise<EsitoPrenotazione> => {
       const richiesta = richiestaConferma({
         codiceFiscale: dati.codiceFiscale,
         zona,
@@ -148,10 +137,9 @@ export async function prenotaData(
         singola,
       });
       if (!opz.reale) {
-        console.log(JSON.stringify({ prova_prenotazione: strutturaMascherata(richiesta) }));
-        return { esito: "prova", appuntamento: appuntamentoSemplice(singola.appuntamento), richiesta };
+        console.log(JSON.stringify({ prova_prenotazione: strutturaMascherata(richiesta), trattenuta }));
+        return { esito: "prova", appuntamento: appuntamentoSemplice(singola.appuntamento), richiesta, trattenuta };
       }
-
       let esito: any;
       try {
         esito = await s.chiama("pgpcitt_conferma_disponibilita", richiesta);
@@ -171,7 +159,39 @@ export async function prenotaData(
         appuntamenti: fatti.map(appuntamentoSemplice),
         codici: fatti.map((x) => String(x.ipCup ?? x.codice ?? "")).filter(Boolean),
         importo: esito?.importo != null ? String(esito.importo) : null,
+        trattenuta,
       };
+    };
+
+    for (const zona of zone) {
+      const r: any = await s.chiama(
+        "pgpcitt_ricerca_disponibilita",
+        criteriDisponibilita({
+          codiceFiscale: dati.codiceFiscale,
+          zona,
+          ricetta,
+          tipo,
+          regimeErogazione: regime,
+          recapiti: recapiti(login),
+          // La stessa ricerca dei giri: con un limite "al" il sito propone date diverse (provato il 25/11/2026).
+          vincoli: { dal: oggiRoma(opz.ora), al: null, mattina: true, pomeriggio: true },
+        }),
+      );
+      const candidate = (r?.singole ?? []).filter((x: any) => corrisponde(x?.appuntamento, bersaglio));
+      if (candidate.length === 0)
+        console.log(JSON.stringify({ prenota_non_trovata: { zona: zona.codice, date: (r?.singole ?? []).length } }));
+      const singola =
+        candidate.find((x: any) => !bersaglio.agenda || x.appuntamento?.agenda?.codice === bersaglio.agenda) ?? candidate[0];
+      if (singola) return concludi(zona, singola, false);
+    }
+
+    // Non si vede: forse è la data trattenuta dall'ultima ricerca. Se la sua proposta è recente, si usa quella.
+    const r = opz.riserva;
+    const adesso = (opz.ora ?? new Date()).getTime();
+    if (r && corrisponde(r.singola?.appuntamento, bersaglio) && adesso - Date.parse(r.quando) < DURATA_PROPOSTA_MS) {
+      const provincia = String(r.singola.appuntamento?.unitaErogante?.presidio?.puntoIndirizzo?.localita?.codice ?? "").slice(0, 3);
+      const zona = zone.find((z) => z.codiceProvincia === provincia) ?? zone[0];
+      return concludi(zona, r.singola, true);
     }
     return { esito: "non-disponibile" };
   });

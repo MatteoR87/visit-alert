@@ -72,8 +72,20 @@ function appuntamentoPerConferma(a: any) {
   for (const k of CAMPI_APPUNTAMENTO) fuori[k] = a?.[k] ?? null;
   fuori.cicli = Array.isArray(a?.cicli) ? a.cicli : [];
   fuori.ricetta = ricettaDaAppuntamento(a);
+  // Come i modelli del sito (AppuntamentoCittadino, InfoLink): oggetti con i campi a null, mai null.
+  fuori.cittadino = a?.cittadino ?? CITTADINO_VUOTO;
+  for (const k of CAMPI_INFO) fuori[k] = a?.[k] ?? { testo: null, link: null };
   return fuori;
 }
+
+const CITTADINO_VUOTO = {
+  codiceFiscale: null, codiceSanitario: null, nome: null, cognome: null, sesso: null, nascita: null,
+  localita: null, residenza: null, indirizzo: null, tel: null, sms: null, email: null,
+};
+const CAMPI_INFO = [
+  "infoNote", "infoNotePreparazione", "infoLuogoPresentazione", "infoMemorandum",
+  "infoNoteDisdettaPrenotazione", "infoConsensoInformato", "infoMezzi",
+] as const;
 
 /** Il ConfermaDisponibilita del sito, per una disponibilità singola. */
 export function richiestaConferma(p: {
@@ -90,7 +102,10 @@ export function richiestaConferma(p: {
       {
         selezionabile: true,
         appuntamento: appuntamentoPerConferma(p.singola.appuntamento),
-        prestazioni: null,
+        // Il sito la riempie (Disponibilita.getPrestazioni) nella finestra di verifica, prima della conferma:
+        // con null il sito risponde ERROR.UNHANDLED (prima prova reale, 25/11/2026; richiesta del sito
+        // confrontata il 25/11/2026).
+        prestazioni: p.singola.appuntamento?.prestazione ? [p.singola.appuntamento.prestazione] : [],
         richiesta: p.singola.richiesta ?? null,
         primaDataProposta: p.singola.primaDataProposta ?? null,
       },

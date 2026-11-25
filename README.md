@@ -27,12 +27,15 @@ un pulsante **📅 N**:
 3. Esito: **prenotato** (nuovo appuntamento, codice CUP, importo; un controllo `/avvia` continua confrontando con
    il nuovo appuntamento, una ricerca `/cerca` finisce), **non più disponibile**, o l'errore del sito.
 
-La richiesta (`ConfermaDisponibilita` del sito): `{codiceFiscale, disponibilita: [{selezionabile, appuntamento,
-prestazioni: null, richiesta, primaDataProposta}], appuntamenti: [], zona, ricetta (come nella ricerca, con
-appuntamenti: null), tipoPrestazione, recapiti}`; `appuntamento` è quello della disponibilità ridotto ai campi
-del modello Appuntamento del sito (gli assenti a `null`, `cicli` lista) con `ricetta` = una Ricetta vuota con
-`iup`, `iurp` e `modulo: {id, tipo}` (Appuntamento.newFrom / Ricetta.newFromAppuntamento). `richiesta` è il
-codice che lega la data alla ricerca appena fatta: per questo si rifà la ricerca.
+La richiesta (`ConfermaDisponibilita` del sito, confrontata con una prenotazione fatta dal sito il 25/11/2026):
+`{codiceFiscale, disponibilita: [{selezionabile, appuntamento, prestazioni: [prestazione dell'appuntamento],
+richiesta, primaDataProposta}], appuntamenti: [], zona, ricetta (come nella ricerca, con appuntamenti: null),
+tipoPrestazione, recapiti}`. `prestazioni` va riempita (il sito lo fa nella finestra di verifica): con `null` il
+sito risponde `ERROR.UNHANDLED`. `appuntamento` è quello della disponibilità ridotto ai campi del modello
+Appuntamento del sito (gli assenti a `null`, `cicli` lista, `cittadino` e `info*` oggetti con i campi a `null`)
+con `ricetta` = una Ricetta vuota con `iup`, `iurp` e `modulo: {id, tipo}` (Appuntamento.newFrom /
+Ricetta.newFromAppuntamento). `richiesta` è il codice che lega la data alla ricerca appena fatta: per questo si
+rifà la ricerca.
 
 Se il sito rifiuta la conferma, nei log di Vercel va `{"conferma_rifiutata": {codice, dettaglio, trattenuta,
 richiesta}}`: il testo dell'eccezione del sito ripulito (email, codici e numeri lunghi sostituiti) e la

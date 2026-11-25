@@ -68,6 +68,10 @@ test("prova: prepara la richiesta come il sito e non la invia; la ricetta si sbl
   assert.equal(ap.ipCup, null);
   assert.deepEqual(ap.cicli, []);
   assert.equal(Object.keys(ap).length, 37);
+  // Come la richiesta del sito: prestazioni della disponibilità piene, cittadino e info* oggetti.
+  assert.deepEqual(q.disponibilita[0].prestazioni, [{ descrizione: "ECO" }]);
+  assert.equal(ap.cittadino.codiceFiscale, null);
+  assert.deepEqual(ap.infoMezzi, { testo: null, link: null });
   assert.equal(q.ricetta.emessaIl, "20261118");
   assert.equal(q.ricetta.appuntamenti, null);
   assert.equal(q.ricetta.prestazioniPrenotate.length, 1);

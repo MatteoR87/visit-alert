@@ -26,7 +26,14 @@ export async function GET(request: Request) {
     await tg.chiama("setMyCommands", { commands: COMANDI });
     const bot = await tg.chiama("getMe", {});
     await apriDb(amb); // crea le tabelle e verifica Turso
-    return Response.json({ ok: true, bot: `@${bot.username}`, webhook, utenti: amb.utenti.size, database: "ok" });
+    return Response.json({
+      ok: true,
+      bot: `@${bot.username}`,
+      webhook,
+      utenti: amb.utenti.size,
+      database: "ok",
+      prenotazione: amb.prenotazioneReale ? "reale" : "prova",
+    });
   } catch (e) {
     return Response.json({ ok: false, errore: (e as Error).message.slice(0, 300) }, { status: 502 });
   }

@@ -111,7 +111,7 @@ test("/anticipa: altre strutture della provincia; il giro avvisa per tutte quell
   assert.ok(scelta.tastiera!.flat().some((p) => p.text.startsWith("✅ Luogo ALTRO")));
   await tocca("a:1:P1", scelta.id); // si può togliere anche la propria, se ne resta un'altra
   await tocca("a:1:ALTRO", scelta.id);
-  assert.match(tg.risposte.at(-1)!.testo ?? "", /almeno una struttura/);
+  assert.match(tg.risposte.at(-1)!.testo ?? "", /unica scelta/);
   await tocca("a:1:P1", scelta.id);
   await tocca("m:1", scelta.id);
   const [c] = await leggiControlli(db, CHIAVE);
@@ -138,6 +138,53 @@ test("/avvia con dati sbagliati: messaggio cancellato e spiegazione", async () =
   await scrivi(`/avvia ${CF} 12 ${NRE}`, UTENTE, 9);
   assert.deepEqual(tg.cancellati, [9]);
   assert.match(tg.ultimo, /ultime 5/);
+});
+
+test("/anticipa: 📍 Cambia provincia cerca nelle zone scelte; il cron e le strutture usano quelle", async () => {
+  const { db, tg, sito, ctx, scrivi, tocca } = await ambiente();
+  const VARESE = { codice: "012%", codiceProvincia: "012", codiceComune: "%", descrizione: "VARESE" };
+  const MILANO = { codice: "015146", codiceProvincia: "015", codiceComune: "146", descrizione: "MILANO" };
+  const COMO = { codice: "013%", codiceProvincia: "013", codiceComune: "%", descrizione: "COMO" };
+  sito.stato.esito = { appuntamento: appuntamento(), date: [libera("20270505113000")], tipo: "O", zona: VARESE, zoneSito: [VARESE, MILANO, COMO] };
+  const zoneChieste: unknown[] = [];
+  const giroBase = ctx.giro;
+  ctx.giro = async (dati, opz) => {
+    zoneChieste.push(opz.zone?.map((z) => z.codice) ?? null);
+    return giroBase(dati, opz);
+  };
+  await scrivi(`/anticipa ${CF} ${CIFRE} ${NRE}`);
+  const m = tg.conPulsanti!;
+  assert.match(m.testo, /Province: VARESE/);
+  await tocca("az:1", m.id);
+  assert.match(m.testo, /In quali province cerco\?/);
+  assert.ok(m.tastiera!.flat().some((p) => p.text === "✅ VARESE"));
+  await tocca("azz:1:012%", m.id); // tolta
+  await tocca("azz:1:015146", m.id);
+  await tocca("azz:1:013%", m.id);
+
+  // Il sito ora risponde con date a Milano e Como.
+  sito.stato.esito = {
+    ...sito.stato.esito,
+    date: [libera("20270301083000", "MI1"), libera("20270302083000", "CO1"), libera("20270303083000", "MI1")],
+  };
+  await tocca("azok:1", m.id);
+  assert.deepEqual(zoneChieste.at(-1), ["015146", "013%"]);
+  assert.match(m.testo, /Province: MILANO, COMO/);
+  assert.ok(m.tastiera!.flat().some((p) => p.callback_data === "a:1:MI1" && p.text.startsWith("▫️ Luogo MI1 · 2 date")));
+  await tocca("a:1:MI1", m.id);
+  await tocca("a:1:P1", m.id); // la struttura dell'appuntamento (senza date qui) si può togliere ora
+  assert.match(m.testo, /1\. lun 01\/03\/2027 08:30 — Luogo MI1/);
+  await tocca("m:1", m.id);
+
+  const [c] = await leggiControlli(db, CHIAVE);
+  assert.ok(c.modalita === "anticipa");
+  if (c.modalita !== "anticipa") return;
+  assert.deepEqual(c.contesto.zone!.map((z) => z.codice), ["015146", "013%"]);
+  assert.deepEqual(c.contesto.presidi!.map((p) => p.codice), ["MI1"]);
+  sito.stato.esito = { ...sito.stato.esito, date: [libera("20270228083000", "MI1"), libera("20270301083000", "MI1")] };
+  assert.equal(await controllaUno(c, ctx), "notificato");
+  assert.deepEqual(zoneChieste.at(-1), ["015146", "013%"]); // anche il cron cerca lì
+  assert.match(tg.ultimo, /🆕 dom 28\/02\/2027 08:30 — Luogo MI1/);
 });
 
 test("/avvia (nome di prima) con date già anticipate le mostra subito; dopo ✅ il giro non le ripete", async () => {

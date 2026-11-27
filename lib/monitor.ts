@@ -102,7 +102,7 @@ export async function controllaUno(c: Controllo, ctx: Contesto): Promise<Esito> 
 async function controllaAnticipa(c: ControlloAnticipa, ctx: Contesto): Promise<Esito> {
   let r: EsitoSito;
   try {
-    r = await (ctx.giro ?? giroSito)(c.dati, { tipo: c.tipo, zona: c.contesto.zona });
+    r = await (ctx.giro ?? giroSito)(c.dati, { tipo: c.tipo, zona: c.contesto.zona, zone: c.contesto.zone });
   } catch (e) {
     return errore(c, e, ctx);
   }

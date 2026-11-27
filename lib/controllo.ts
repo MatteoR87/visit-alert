@@ -29,6 +29,8 @@ export type EsitoSito = {
   zona: Zona | null;
   /** Le disponibilità grezze, per prenotare una data trattenuta da questa ricerca. */
   proposte?: Proposte;
+  /** Le zone del sito, se chieste (elencoZone) o lette per trovare la zona. */
+  zoneSito?: Zona[];
 };
 
 /** Una fascia oraria in minuti dalla mezzanotte, estremi inclusi. */
@@ -89,6 +91,10 @@ export type OpzioniGiro = OpzioniSessione & {
   tipo?: Tipo | null;
   /** Zona già nota, per risparmiare una chiamata. */
   zona?: Zona | null;
+  /** Le zone in cui cercare (scelte con /anticipa); senza, la zona del presidio dell'appuntamento. */
+  zone?: Zona[] | null;
+  /** Anche l'elenco delle zone del sito (per sceglierle). */
+  elencoZone?: boolean;
   /** "Adesso", per i test. */
   ora?: Date;
 };
@@ -360,9 +366,9 @@ async function zoneDelSito(s: SessionePrenota): Promise<Zona[]> {
   return (zone ?? []).map((z) => ({ ...z, codice: `${z.codiceProvincia}${z.codiceComune}` }));
 }
 
-async function trovaZona(s: SessionePrenota, appuntamento: any): Promise<Zona> {
+function zonaDi(zone: Zona[], appuntamento: any): Zona {
   const provincia = String(appuntamento?.unitaErogante?.presidio?.puntoIndirizzo?.localita?.codice ?? "").slice(0, 3);
-  const z = (await zoneDelSito(s)).find((x) => x.codiceProvincia === provincia && x.codiceComune === "%");
+  const z = zone.find((x) => x.codiceProvincia === provincia && x.codiceComune === "%");
   if (!z) throw new Error(`Zona della provincia ${provincia || "?"} non trovata`);
   return z;
 }
@@ -375,23 +381,46 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
     if (!grezzo) return { appuntamento: null, date: [], tipo: opz.tipo ?? "O", zona: opz.zona ?? null };
     const appuntamento = appuntamentoSemplice(grezzo);
 
-    const zona = opz.zona ?? (await trovaZona(s, grezzo));
+    const zoneSito = opz.elencoZone || !opz.zona ? await zoneDelSito(s) : undefined;
+    const zona = opz.zona ?? zonaDi(zoneSito!, grezzo);
+    // Le zone scelte con /anticipa (fino a 4), altrimenti quella del presidio dell'appuntamento.
+    const doveCercare = opz.zone && opz.zone.length > 0 ? opz.zone : [zona];
     let proposte: Proposte = {};
     const cerca = async (tipo: Tipo) => {
-      const r = await s.chiama(
-        "pgpcitt_ricerca_disponibilita",
-        criteriDisponibilita({
-          codiceFiscale: dati.codiceFiscale,
-          zona,
-          ricetta,
-          tipo,
-          regimeErogazione: grezzo.regimeErogazione ?? null,
-          recapiti: recapiti(login),
-          vincoli: { dal: oggiRoma(opz.ora), al: null, mattina: true, pomeriggio: true },
-        }),
-      );
-      proposte = leggiProposte(r);
-      return leggiDisponibilita(r);
+      const tutte: DataLibera[] = [];
+      const p: Proposte = {};
+      let fallite = 0;
+      let ultimoErrore: unknown = null;
+      for (const z of doveCercare) {
+        try {
+          const r = await s.chiama(
+            "pgpcitt_ricerca_disponibilita",
+            criteriDisponibilita({
+              codiceFiscale: dati.codiceFiscale,
+              zona: z,
+              ricetta,
+              tipo,
+              regimeErogazione: grezzo.regimeErogazione ?? null,
+              recapiti: recapiti(login),
+              vincoli: { dal: oggiRoma(opz.ora), al: null, mattina: true, pomeriggio: true },
+            }),
+          );
+          tutte.push(...leggiDisponibilita(r));
+          Object.assign(p, leggiProposte(r));
+        } catch (e) {
+          // Con più zone una che fallisce non ferma le altre; con una sola (o tutte fallite) è un errore.
+          if (e instanceof InCoda || doveCercare.length === 1) throw e;
+          fallite++;
+          ultimoErrore = e;
+          console.warn(JSON.stringify({ giro: { zona: z.codice, errore: (e as Error).message.slice(0, 120) } }));
+        }
+      }
+      if (fallite === doveCercare.length) throw ultimoErrore;
+      proposte = p;
+      const viste = new Set<string>();
+      return tutte
+        .filter((d) => (viste.has(chiaveData(d)) ? false : (viste.add(chiaveData(d)), true)))
+        .sort((a, b) => a.data.localeCompare(b.data));
     };
 
     let tipo = opz.tipo ?? tipoDaRicetta(ricetta);
@@ -413,7 +442,7 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
         } else proposte = proposteO;
       }
     }
-    return { appuntamento, date, tipo, zona, proposte };
+    return { appuntamento, date, tipo, zona, proposte, zoneSito };
   });
 }
 

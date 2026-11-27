@@ -480,7 +480,7 @@ export async function gestisciMonitoraggio(q: any, utenteId: string, ctx: Contes
   const c = (await leggiControlli(ctx.db, ctx.chiave, utenteId)).find((x) => x.id === Number(n));
   // Tolti 🔔/✅/✖️, le strutture e gli altri pulsanti di scelta, restano i 📅 (servono finché il controllo esiste).
   const senzaRiga = ((q.message?.reply_markup?.inline_keyboard ?? []) as Tastiera).filter(
-    (riga) => !riga.some((p) => /^(mx?|a|ap|d):/.test(String(p.callback_data ?? ""))),
+    (riga) => !riga.some((p) => /^(mx?|a\w*|d):/.test(String(p.callback_data ?? ""))),
   );
   if (!c) {
     await ctx.tg.rispondiPulsante(q.id, "Non c'è più (dati già cancellati)");

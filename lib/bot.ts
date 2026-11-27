@@ -1,6 +1,6 @@
 // Comandi del bot Telegram (vedi README e AIUTO in messaggi.ts).
 import type { Client } from "@libsql/client";
-import { cercaMigliori, schermataAnticipa, toccaStruttura } from "./anticipa.js";
+import { cercaMigliori, gestisciZone, schermataAnticipa, toccaStruttura } from "./anticipa.js";
 import { avviaCerca, gestisciMonitoraggio, gestisciPulsante, gestisciTesto, type ContestoCerca } from "./cerca.js";
 import { chiaveData, dateAnticipate, ErroreUtente, giroSito, type Tipo } from "./controllo.js";
 import { leggiDatiRicetta } from "./dati.js";
@@ -120,6 +120,7 @@ async function pulsante(q: any, ctx: ContestoBot) {
   if (dato.startsWith("c:")) return gestisciPulsante(q, utenteId, ctx);
   if (dato.startsWith("m:") || dato.startsWith("mx:")) return gestisciMonitoraggio(q, utenteId, ctx);
   if (dato.startsWith("a:")) return toccaStruttura(q, utenteId, ctx);
+  if (/^az(z|ok|x)?:/.test(dato)) return gestisciZone(q, utenteId, ctx);
   if (dato.startsWith("ap:")) return cercaMigliori(q, utenteId, ctx);
   if (dato.startsWith("d:")) return chiediDisdetta(q, utenteId, ctx);
   if (dato.startsWith("dc:")) return eseguiDisdetta(q, utenteId, ctx);
@@ -184,6 +185,7 @@ async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx:
       monitora: false,
       presidi: [r.appuntamento.presidio],
       dateZona: r.date,
+      zoneSito: r.zoneSito,
     },
   });
   const c = (await leggiControlli(ctx.db, ctx.chiave, utenteId)).find((x) => x.id === id);

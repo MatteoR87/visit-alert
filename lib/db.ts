@@ -56,9 +56,20 @@ export type ContestoAnticipa = {
   monitora?: boolean;
   /** Le strutture scelte; assente o vuota = quella dell'appuntamento. */
   presidi?: Luogo[];
-  /** Tutte le date della zona all'ultimo giro (per scegliere le strutture). */
+  /** Tutte le date delle zone all'ultimo giro (per scegliere le strutture). */
   dateZona?: DataLibera[];
+  /** Le zone (province) scelte con /anticipa; assente o vuota = quella del presidio dell'appuntamento. */
+  zone?: Zona[];
+  /** Le zone del sito, per sceglierle. */
+  zoneSito?: Zona[];
+  /** La scelta delle zone in corso (📍 Cambia provincia), prima di "🔎 Cerca". */
+  zoneInScelta?: string[];
 };
+
+/** Le zone in cui cerca un controllo anticipa. */
+export function zoneDi(k: ContestoAnticipa): Zona[] {
+  return k.zone && k.zone.length > 0 ? k.zone : k.zona ? [k.zona] : [];
+}
 
 /** I codici delle strutture di un controllo anticipa (default: quella dell'appuntamento). */
 export function presidiDi(k: ContestoAnticipa): string[] {

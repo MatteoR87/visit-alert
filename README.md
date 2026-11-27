@@ -3,8 +3,8 @@
 Bot Telegram per [PrenotaSalute](https://prenotasalute.regione.lombardia.it/prenotaonline/) (Regione Lombardia):
 
 - **`/anticipa`** (prima `/avvia`, che funziona ancora): mostra le date **prima** dell'appuntamento già
-  prenotato e le strutture della provincia (la sua già scelta); con **✅ Avvia il controllo** avvisa quando se ne
-  libera una nelle strutture scelte;
+  prenotato e le strutture della provincia (la sua già scelta; con 📍 si cambiano le province); con **✅ Avvia il
+  controllo** avvisa quando se ne libera una nelle strutture scelte;
 - **`/cerca`**: cerca una visita nelle zone, nel periodo, nella fascia oraria e nelle strutture scelti e mostra
   le **prime 10 date**; solo se lo chiedi (🔔) ripete la ricerca e avvisa quando ne compaiono di migliori;
 - **📅 Prenota**: sotto le date, un pulsante per prenotarle, **solo dopo una conferma esplicita** (vedi
@@ -106,12 +106,21 @@ A ogni giro, per ogni controllo:
 giro, poi un messaggio con l'appuntamento, le date libere prima (con i 📅 per prenotarle) e un pulsante per
 ogni struttura della zona del presidio che ha date (le prime 20 per data, con quante date e la prima), più
 quella dell'appuntamento, già scelta. Toccando una struttura (`a:<id>:<presidio>`) la si sceglie o la si
-toglie (al massimo 10, almeno una) e le date si aggiornano. **✅ Avvia il controllo** (`m:<id>`) mette il
-controllo nel cron (le date già mostrate non si rimandano); **✖️ Annulla** cancella i dati. Fino ad allora il
-controllo non è monitorato e si cancella dopo un'ora. Le strutture sono solo quelle della provincia
-dell'appuntamento (una zona, la stessa ricerca dei giri); le date di tutte restano in `contesto.dateZona`.
-I controlli della prima versione (senza `presidi` né `monitora`) restano monitorati sulla struttura
-dell'appuntamento.
+toglie (al massimo 10, almeno una) e le date si aggiornano. **📍 Cambia provincia** (`az:<id>`) mostra le
+zone del sito (lette al primo giro, `contesto.zoneSito`) con quelle attuali spuntate: se ne scelgono fino a 4
+(`azz:<id>:<zona>`) e **🔎 Cerca qui** (`azok:<id>`) fa un giro in quelle zone e torna alle strutture
+(restano scelte solo quelle che hanno date lì; se non ne resta nessuna vale quella dell'appuntamento, che si
+toglie scegliendone un'altra); **↩️ Indietro** (`azx:<id>`) lascia tutto com'era. **✅ Avvia il controllo**
+(`m:<id>`) mette il controllo nel cron (le date già mostrate non si rimandano): per tenere provincia e struttura
+dell'appuntamento basta toccarlo subito. **✖️ Annulla** cancella i dati. Fino ad allora il controllo non è
+monitorato e si cancella dopo un'ora.
+
+Il giro di un controllo cerca nelle zone scelte (`contesto.zone`, una ricerca per zona; senza scelta la zona del
+presidio dell'appuntamento); con più zone una che fallisce non ferma le altre. Le date di tutte restano in
+`contesto.dateZona`. Anche la prenotazione con 📅 cerca la data in quelle zone. Dopo una prenotazione il nuovo
+controllo tiene le province e le strutture di prima (per `/cerca`, quelle dei filtri) più la struttura del
+nuovo appuntamento. I controlli della prima versione (senza `presidi`, `zone` né `monitora`) restano monitorati
+sulla struttura dell'appuntamento.
 
 Se l'appuntamento cambia (spostato da te) il bot lo dice e da lì confronta con quello nuovo; se la ricetta non ha
 più un appuntamento futuro il controllo si ferma e i dati si cancellano. Dopo 3 errori di fila arriva un avviso

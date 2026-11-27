@@ -4,7 +4,7 @@
 //   migliori" (m:<id>), "🗑 Disdici" (d:<id>) e "✖️ Chiudi" (mx:<id>) per il nuovo appuntamento.
 import type { Client } from "@libsql/client";
 import { chiaveData, type DataLibera } from "./controllo.js";
-import { cancellaControllo, leggiControlli, leggiStato, nuovoControllo, scriviStato, type Controllo } from "./db.js";
+import { cancellaControllo, leggiControlli, leggiStato, nuovoControllo, scriviStato, zoneDi, type Controllo } from "./db.js";
 import { descriviAppuntamento, formatoData } from "./messaggi.js";
 import { InCoda } from "./prenota.js";
 import { prenotaData, type Bersaglio, type EsitoPrenotazione, type Riserva } from "./prenotazione.js";
@@ -125,8 +125,7 @@ export async function eseguiPrenotazione(q: any, utenteId: string, ctx: Contesto
   await ctx.tg.modifica(chatId, messaggio, `⏳ ${ctx.prenotazioneReale ? "Prenoto" : "Prova di prenotazione per"} ${formatoData(letto.bersaglio.data)}…`);
 
   const d = trovaData(c, letto.bersaglio);
-  const zone =
-    c.modalita === "cerca" ? c.contesto.filtri.zone : c.contesto.zona ? [c.contesto.zona] : [];
+  const zone = c.modalita === "cerca" ? c.contesto.filtri.zone : zoneDi(c.contesto);
   let r: EsitoPrenotazione;
   try {
     if (zone.length === 0) throw new Error("zona del controllo sconosciuta: aspetta il prossimo giro e riprova");
@@ -204,12 +203,14 @@ async function dopoLaPrenotazione(
     tipo: c.tipo,
     contesto: {
       appuntamento: nuovo,
-      zona: c.modalita === "anticipa" ? c.contesto.zona : null,
+      // La zona del nuovo appuntamento si ricava al primo giro (può essere un'altra provincia).
+      zona: null,
       notificate: [],
       anticipate: [],
       primaData: null,
       monitora: false,
-      // Le strutture scelte con /anticipa restano, più quella del nuovo appuntamento.
+      // Le province e le strutture scelte prima restano, più la struttura del nuovo appuntamento.
+      zone: c.modalita === "anticipa" ? c.contesto.zone : c.contesto.filtri.zone,
       presidi: strutturePrecedenti(c, nuovo),
     },
   });
@@ -230,8 +231,8 @@ async function dopoLaPrenotazione(
   ]);
 }
 
-/** Le strutture del controllo di prima (se scelte con /anticipa) più quella del nuovo appuntamento. */
+/** Le strutture scelte prima (con /anticipa o /cerca) più quella del nuovo appuntamento. */
 function strutturePrecedenti(c: Controllo, nuovo: { presidio: { codice: string; descrizione: string } }) {
-  const prima = c.modalita === "anticipa" ? (c.contesto.presidi ?? []) : [];
+  const prima = (c.modalita === "anticipa" ? c.contesto.presidi : c.contesto.filtri.presidi) ?? [];
   return prima.some((p) => p.codice === nuovo.presidio.codice) ? prima : [nuovo.presidio, ...prima];
 }

@@ -1,4 +1,4 @@
-// Lettura e controllo dei dati della ricetta scritti al bot (/avvia, /cerca), e dei filtri scritti a mano.
+// Lettura e controllo dei dati della ricetta scritti al bot (/anticipa, /cerca), e dei filtri scritti a mano.
 import { normalizzaNre, type Tipo } from "./controllo.js";
 
 const RE_CF = /^[A-Z0-9]{16}$/;

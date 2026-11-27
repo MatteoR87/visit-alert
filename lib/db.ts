@@ -3,7 +3,7 @@
 // contatori: dati sanitari, appuntamento, filtri e date sono cifrati con CHIAVE_CIFRATURA.
 import type { Client } from "@libsql/client";
 import { cifraJson, decifraJson } from "./cifratura.js";
-import type { Appuntamento, DataLibera, DatiRicetta, Filtri, Proposte, Tipo, Zona } from "./controllo.js";
+import type { Appuntamento, DataLibera, DatiRicetta, Filtri, Luogo, Proposte, Tipo, Zona } from "./controllo.js";
 
 /** Le disponibilità grezze delle date mostrate (le prime 10), con l'ora della ricerca che le ha trovate. */
 export type ProposteSalvate = { quando: string; singole: Proposte };
@@ -49,11 +49,21 @@ export type ContestoAnticipa = {
   primaData: DataLibera | null;
   proposte?: ProposteSalvate;
   /**
-   * false: non monitorato (dopo una prenotazione, o per /disdici): il cron non lo ripete e dopo
-   * DURATA_RICERCA_SINGOLA_MS si cancella, finché non si tocca 🔔. Assente (/avvia) vale true.
+   * false: non monitorato (in attesa di "✅ Avvia il controllo" dopo /anticipa, dopo una prenotazione, o per
+   * /disdici): il cron non lo ripete e dopo DURATA_RICERCA_SINGOLA_MS si cancella, finché non si tocca 🔔/✅.
+   * Assente (controlli della prima versione) vale true.
    */
   monitora?: boolean;
+  /** Le strutture scelte; assente o vuota = quella dell'appuntamento. */
+  presidi?: Luogo[];
+  /** Tutte le date della zona all'ultimo giro (per scegliere le strutture). */
+  dateZona?: DataLibera[];
 };
+
+/** I codici delle strutture di un controllo anticipa (default: quella dell'appuntamento). */
+export function presidiDi(k: ContestoAnticipa): string[] {
+  return k.presidi && k.presidi.length > 0 ? k.presidi.map((p) => p.codice) : [k.appuntamento.presidio.codice];
+}
 
 /** Ricerca nuova con filtri. */
 export type ContestoCerca = {

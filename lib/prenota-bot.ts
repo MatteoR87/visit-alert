@@ -192,7 +192,7 @@ async function dopoLaPrenotazione(
   // monitorato: il cron lo ripete solo dopo "🔔" (conferma esplicita), altrimenti si cancella dopo un'ora.
   await cancellaControllo(ctx.db, c.id);
   if (!nuovo) {
-    righe.push("", `Ho chiuso #${c.id} e cancellato i suoi dati. Per cercare date migliori: /avvia.`);
+    righe.push("", `Ho chiuso #${c.id} e cancellato i suoi dati. Per cercare date migliori: /anticipa.`);
     await ctx.tg.modifica(chatId, messaggio, righe.join("\n"));
     return;
   }
@@ -209,17 +209,29 @@ async function dopoLaPrenotazione(
       anticipate: [],
       primaData: null,
       monitora: false,
+      // Le strutture scelte con /anticipa restano, più quella del nuovo appuntamento.
+      presidi: strutturePrecedenti(c, nuovo),
     },
   });
   righe.push(
     "",
-    `Vuoi che controlli se si libera una data <b>prima</b> di questa, nella stessa struttura? Tocca 🔔 (controllo #${id}). Altrimenti tra un'ora cancello i dati (o subito con ✖️ Chiudi).`,
+    `<b>Vuoi anticipare ancora?</b> (controllo #${id})`,
+    "🔎 <b>Cerca date migliori</b>: guardo adesso le date prima di questa e scegli le strutture.",
+    "⏪ <b>Anticipa (controllo continuo)</b>: ricontrollo ogni 15 minuti di giorno (ogni ora di notte) e ti avviso quando si libera una data prima di questa.",
+    "Senza tocchi, tra un'ora cancello i dati (o subito con ✖️ Chiudi).",
   );
   await ctx.tg.modifica(chatId, messaggio, righe.join("\n"), [
-    [{ text: "🔔 Cerca date migliori", callback_data: `m:${id}` }],
+    [{ text: "🔎 Cerca date migliori", callback_data: `ap:${id}` }],
+    [{ text: "⏪ Anticipa (controllo continuo)", callback_data: `m:${id}` }],
     [
       { text: "🗑 Disdici", callback_data: `d:${id}` },
       { text: "✖️ Chiudi", callback_data: `mx:${id}` },
     ],
   ]);
+}
+
+/** Le strutture del controllo di prima (se scelte con /anticipa) più quella del nuovo appuntamento. */
+function strutturePrecedenti(c: Controllo, nuovo: { presidio: { codice: string; descrizione: string } }) {
+  const prima = c.modalita === "anticipa" ? (c.contesto.presidi ?? []) : [];
+  return prima.some((p) => p.codice === nuovo.presidio.codice) ? prima : [nuovo.presidio, ...prima];
 }

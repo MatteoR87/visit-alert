@@ -1,5 +1,6 @@
 // Comandi del bot Telegram (vedi README e AIUTO in messaggi.ts).
 import type { Client } from "@libsql/client";
+import { cercaMigliori, schermataAnticipa, toccaStruttura } from "./anticipa.js";
 import { avviaCerca, gestisciMonitoraggio, gestisciPulsante, gestisciTesto, type ContestoCerca } from "./cerca.js";
 import { chiaveData, dateAnticipate, ErroreUtente, giroSito, type Tipo } from "./controllo.js";
 import { leggiDatiRicetta } from "./dati.js";
@@ -37,7 +38,7 @@ export type ContestoBot = ContestoMonitor &
   };
 
 export const COMANDI = [
-  { command: "avvia", description: "Anticipa una visita prenotata: /avvia CODICEFISCALE CIFRE NRE" },
+  { command: "anticipa", description: "Anticipa una visita prenotata: /anticipa CODICEFISCALE CIFRE NRE" },
   { command: "cerca", description: "Cerca una visita nuova: /cerca CODICEFISCALE CIFRE NRE" },
   { command: "stato", description: "Controlli e ricerche attivi, ultimo giro" },
   { command: "date", description: "Controlla adesso e mostra le date" },
@@ -47,7 +48,7 @@ export const COMANDI = [
   { command: "id", description: "Il tuo ID Telegram" },
 ];
 
-/** Compatibilità: la lettura dei dati di /avvia e /cerca. */
+/** Compatibilità: la lettura dei dati di /anticipa e /cerca. */
 export const leggiAvvia = leggiDatiRicetta;
 
 export async function gestisciAggiornamento(update: any, ctx: ContestoBot): Promise<void> {
@@ -70,9 +71,9 @@ export async function gestisciAggiornamento(update: any, ctx: ContestoBot): Prom
   const [primo, ...argomenti] = testo.trim().split(/\s+/);
   const comando = primo.slice(1).split("@")[0].toLowerCase();
 
-  // I messaggi di /avvia, /cerca e /disdici possono contenere i dati sanitari: si cancellano prima di tutto,
+  // I messaggi di /anticipa (/avvia), /cerca e /disdici possono contenere i dati sanitari: si cancellano prima di tutto,
   // anche se l'utente non è ammesso.
-  if (comando === "avvia" || comando === "cerca" || (comando === "disdici" && argomenti.length > 1))
+  if (comando === "anticipa" || comando === "avvia" || comando === "cerca" || (comando === "disdici" && argomenti.length > 1))
     await ctx.tg.cancella(chatId, msg.message_id);
 
   if (comando === "id") {
@@ -90,7 +91,8 @@ export async function gestisciAggiornamento(update: any, ctx: ContestoBot): Prom
     case "help":
       await ctx.tg.manda(chatId, AIUTO);
       return;
-    case "avvia":
+    case "anticipa":
+    case "avvia": // il nome di prima, ancora valido
       return avvia(argomenti, chatId, utenteId, ctx);
     case "cerca":
       return avviaCerca(argomenti, chatId, utenteId, ctx);
@@ -117,6 +119,8 @@ async function pulsante(q: any, ctx: ContestoBot) {
   const dato = String(q.data ?? "");
   if (dato.startsWith("c:")) return gestisciPulsante(q, utenteId, ctx);
   if (dato.startsWith("m:") || dato.startsWith("mx:")) return gestisciMonitoraggio(q, utenteId, ctx);
+  if (dato.startsWith("a:")) return toccaStruttura(q, utenteId, ctx);
+  if (dato.startsWith("ap:")) return cercaMigliori(q, utenteId, ctx);
   if (dato.startsWith("d:")) return chiediDisdetta(q, utenteId, ctx);
   if (dato.startsWith("dc:")) return eseguiDisdetta(q, utenteId, ctx);
   if (dato === "dx") return annullaDisdetta(q, ctx);
@@ -129,7 +133,7 @@ async function pulsante(q: any, ctx: ContestoBot) {
 async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx: ContestoBot) {
   const a = leggiDatiRicetta(argomenti);
   if (!a.ok) {
-    await ctx.tg.manda(chatId, `❌ ${a.errore}\nHo cancellato il messaggio. Riprova: <code>/avvia CODICEFISCALE CIFRE NRE</code>`);
+    await ctx.tg.manda(chatId, `❌ ${a.errore}\nHo cancellato il messaggio. Riprova: <code>/anticipa CODICEFISCALE CIFRE NRE</code>`);
     return;
   }
   await ctx.tg.manda(chatId, "🔒 Ho cancellato il messaggio con i tuoi dati. ⏳ Controllo la ricetta su PrenotaSalute (fino a un minuto)…");
@@ -157,12 +161,13 @@ async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx:
     return;
   }
 
-  // Un nuovo /avvia con lo stesso NRE sostituisce il controllo di prima (non le ricerche).
+  // Un nuovo /anticipa con lo stesso NRE sostituisce il controllo di prima (non le ricerche).
   for (const c of await leggiControlli(ctx.db, ctx.chiave, utenteId)) {
     if (c.modalita === "anticipa" && c.dati.nre === dati.nre) await cancellaControllo(ctx.db, c.id);
   }
   const anticipate = dateAnticipate(r.appuntamento, r.date);
   const primaData = r.date.find((d) => d.presidio.codice === r.appuntamento!.presidio.codice) ?? null;
+  // Non monitorato finché non si sceglie e si tocca "✅ Avvia il controllo" (anticipa.ts).
   const id = await nuovoControllo(ctx.db, ctx.chiave, {
     modalita: "anticipa",
     chatId,
@@ -172,31 +177,19 @@ async function avvia(argomenti: string[], chatId: string, utenteId: string, ctx:
     contesto: {
       appuntamento: r.appuntamento,
       zona: r.zona,
-      notificate: anticipate.map(chiaveData),
+      notificate: [],
       anticipate,
       primaData,
-      proposte: salvaProposte(r.proposte, anticipate),
+      proposte: salvaProposte(r.proposte, r.date),
+      monitora: false,
+      presidi: [r.appuntamento.presidio],
+      dateZona: r.date,
     },
   });
-
-  const righe = [
-    `✅ <b>Controllo #${id} avviato</b>`,
-    "",
-    descriviAppuntamento(r.appuntamento),
-    `Tipo: ${formatoTipo(r.tipo as Tipo)}${a.tipo ? "" : " (trovato in automatico)"}`,
-    "",
-    anticipate.length > 0
-      ? `Ci sono già ${anticipate.length} date libere prima: te le mando qui sotto.`
-      : `Per ora nessuna data libera prima della tua.${primaData ? ` La prima libera nella struttura è ${formatoData(primaData.data)}.` : ""}`,
-    "Ricontrollo ogni 15 minuti di giorno (ogni ora di notte) e ti scrivo solo quando compare una data nuova prima della tua.",
-  ];
-  await ctx.tg.manda(chatId, righe.join("\n"));
-  if (anticipate.length > 0)
-    await ctx.tg.manda(
-      chatId,
-      messaggioAnticipate(id, r.appuntamento, anticipate, new Set(anticipate.map(chiaveData))),
-      tastieraPrenota(id, anticipate),
-    );
+  const c = (await leggiControlli(ctx.db, ctx.chiave, utenteId)).find((x) => x.id === id);
+  if (c?.modalita !== "anticipa") return;
+  const s = schermataAnticipa(c);
+  await ctx.tg.manda(chatId, `Tipo: ${formatoTipo(r.tipo as Tipo)}${a.tipo ? "" : " (trovato in automatico)"}\n\n${s.testo}`, s.tastiera);
 }
 
 /**
@@ -251,7 +244,7 @@ async function stato(chatId: string, utenteId: string, ctx: ContestoBot) {
   const { giallo, rosso } = sogliaCron();
   const semaforo = minuti === null ? "🔴" : minuti > rosso ? "🔴" : minuti > giallo ? "🟠" : "🟢";
   const righe = [`${semaforo} Ultimo giro del cron: ${cron ? `${quando(cron.aggiornato)} (${minuti} min fa)` : "mai"}`];
-  if (controlli.length === 0) righe.push("", "Nessun controllo attivo. /avvia per anticipare una visita prenotata, /cerca per cercarne una.");
+  if (controlli.length === 0) righe.push("", "Nessun controllo attivo. /anticipa per anticipare una visita prenotata, /cerca per cercarne una.");
   for (const c of controlli) righe.push("", ...descriviControllo(c));
   await ctx.tg.manda(chatId, righe.join("\n"));
 }

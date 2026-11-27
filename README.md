@@ -2,11 +2,13 @@
 
 Bot Telegram per [PrenotaSalute](https://prenotasalute.regione.lombardia.it/prenotaonline/) (Regione Lombardia):
 
-- **`/avvia`**: avvisa quando si libera una data **prima** dell'appuntamento già prenotato, **nella stessa struttura**;
-- **`/cerca`**: cerca una visita nelle zone, nel periodo e nella fascia oraria scelti e mostra le **prime 10
-  date**; solo se lo chiedi (🔔) ripete la ricerca e avvisa quando ne compaiono di migliori;
+- **`/anticipa`** (prima `/avvia`, che funziona ancora): mostra le date **prima** dell'appuntamento già
+  prenotato e le strutture della provincia (la sua già scelta); con **✅ Avvia il controllo** avvisa quando se ne
+  libera una nelle strutture scelte;
+- **`/cerca`**: cerca una visita nelle zone, nel periodo, nella fascia oraria e nelle strutture scelti e mostra
+  le **prime 10 date**; solo se lo chiedi (🔔) ripete la ricerca e avvisa quando ne compaiono di migliori;
 - **📅 Prenota**: sotto le date, un pulsante per prenotarle, **solo dopo una conferma esplicita** (vedi
-  "Prenotazione"); dopo, con **🔔**, il bot cerca date migliori per il nuovo appuntamento;
+  "Prenotazione"); dopo, **🔎 Cerca date migliori** o **⏪ Anticipa** per anticipare ancora;
 - **`/disdici`**: disdice una visita prenotata, **solo dopo una conferma esplicita** (vedi "Disdetta").
 
 Funzioni Vercel senza framework (TypeScript, moduli ESM, regione `fra1`), database Turso, solo chiamate HTTP
@@ -15,7 +17,7 @@ pulsanti, dopo la conferma (quando si sposta, il vecchio appuntamento lo annulla
 
 ## Prenotazione
 
-Sotto ogni elenco di date (notifiche, `/avvia`, `/date`, risultati di `/cerca`) le prime 10 sono numerate e hanno
+Sotto ogni elenco di date (notifiche, `/anticipa`, `/date`, risultati di `/cerca`) le prime 10 sono numerate e hanno
 un pulsante **📅 N**:
 
 1. **📅 N** → il bot mostra data, ospedale e reparto e le avvertenze: se la ricetta è già prenotata, *il sito
@@ -27,9 +29,13 @@ un pulsante **📅 N**:
    (e agenda, se ce ne sono più d'una), poi `pgpcitt_conferma_disponibilita`.
 3. Esito: **prenotato** (nuovo appuntamento, codice CUP, importo), **non più disponibile**, o l'errore del sito.
 4. Dopo una prenotazione il controllo o la ricerca di prima finisce e al suo posto c'è un controllo del nuovo
-   appuntamento **non monitorato**, con i pulsanti **🔔 Cerca date migliori** (da lì il cron cerca date prima
-   del nuovo appuntamento, nella stessa struttura, come `/avvia`), **🗑 Disdici** e **✖️ Chiudi**. Senza 🔔 il
-   cron non lo ripete e dopo un'ora si cancella.
+   appuntamento **non monitorato** (strutture: quella del nuovo appuntamento più quelle scelte prima), con:
+   - **🔎 Cerca date migliori** (`ap:`): un giro adesso e la stessa schermata di `/anticipa` (date prima del
+     nuovo appuntamento con i 📅, strutture da scegliere, **✅ Avvia il controllo**);
+   - **⏪ Anticipa (controllo continuo)** (`m:`): il cron parte subito, con le strutture del controllo;
+   - **🗑 Disdici** e **✖️ Chiudi**.
+
+   Senza tocchi il cron non lo ripete e dopo un'ora si cancella.
 
 La richiesta (`ConfermaDisponibilita` del sito, confrontata con una prenotazione fatta dal sito il 25/11/2026):
 `{codiceFiscale, disponibilita: [{selezionabile, appuntamento, prestazioni: [prestazione dell'appuntamento],
@@ -51,7 +57,7 @@ struttura mascherata della richiesta. Il primo tentativo reale (25/11/2026) è s
 prova del 25/11/2026 con ricerche a 0 s, 22 s, 5 e 10 minuti) la **prima** data che propone: una ricerca subito
 dopo, del bot o di chiunque sul sito, non la vede; le altre date restano visibili. Quindi la data migliore di una
 notifica può non comparire sul sito per qualche minuto, e la ricerca fatta al momento di prenotare può non
-vederla. Per questo i giri e `/avvia`/`/cerca` salvano (cifrate) le disponibilità grezze delle prime 10 date con
+vederla. Per questo i giri e `/anticipa`/`/cerca` salvano (cifrate) le disponibilità grezze delle prime 10 date con
 l'ora (`contesto.proposte`): se la ricerca nuova non trova la data e la proposta ha meno di 20 minuti, si conferma
 con quella (la sua `richiesta` è quella che la trattiene). Se il sito la rifiuta non cambia nulla.
 
@@ -80,7 +86,7 @@ La modalità prova vale anche qui (`prova_disdetta` nei log).
 ## Come funziona
 
 ```
-Telegram ──webhook──▶ /api/telegram ──▶ /avvia CF CIFRE NRE ──▶ giro sul sito ──▶ Turso (dati cifrati)
+Telegram ──webhook──▶ /api/telegram ──▶ /anticipa CF CIFRE NRE ──▶ giro sul sito ──▶ Turso (dati cifrati)
 cron-job.org ──▶ /api/controlla ──▶ per ogni controllo: giro sul sito ──▶ date nuove prima dell'appuntamento ──▶ Telegram
 ```
 
@@ -89,9 +95,23 @@ A ogni giro, per ogni controllo:
 1. accesso al sito con codice fiscale e ultime 5 cifre della tessera;
 2. la ricetta (NRE) con il suo **appuntamento futuro** (data, presidio, agenda);
 3. le disponibilità nella zona (provincia) del presidio, per lo stesso tipo di prestazione;
-4. le date **prima** dell'appuntamento **nello stesso presidio**: se ce n'è almeno una mai notificata arriva un
-   messaggio con tutte (🆕 le nuove). Le date in un'altra agenda dello stesso presidio sono segnalate come tali;
+4. le date **prima** dell'appuntamento **nelle strutture scelte** (`contesto.presidi`; senza scelta, quella
+   dell'appuntamento): se ce n'è almeno una mai notificata arriva un messaggio con tutte (🆕 le nuove). Le date
+   in un'altra struttura hanno il suo nome, quelle in un'altra agenda dello stesso presidio sono segnalate;
 5. sblocco della ricetta elettronica (sempre, anche dopo un errore).
+
+### Anticipare (`/anticipa`)
+
+`/anticipa CF CIFRE NRE [O|Z]` (messaggio cancellato subito; `/avvia` è il nome di prima e vale ancora) → un
+giro, poi un messaggio con l'appuntamento, le date libere prima (con i 📅 per prenotarle) e un pulsante per
+ogni struttura della zona del presidio che ha date (le prime 20 per data, con quante date e la prima), più
+quella dell'appuntamento, già scelta. Toccando una struttura (`a:<id>:<presidio>`) la si sceglie o la si
+toglie (al massimo 10, almeno una) e le date si aggiornano. **✅ Avvia il controllo** (`m:<id>`) mette il
+controllo nel cron (le date già mostrate non si rimandano); **✖️ Annulla** cancella i dati. Fino ad allora il
+controllo non è monitorato e si cancella dopo un'ora. Le strutture sono solo quelle della provincia
+dell'appuntamento (una zona, la stessa ricerca dei giri); le date di tutte restano in `contesto.dateZona`.
+I controlli della prima versione (senza `presidi` né `monitora`) restano monitorati sulla struttura
+dell'appuntamento.
 
 Se l'appuntamento cambia (spostato da te) il bot lo dice e da lì confronta con quello nuovo; se la ricetta non ha
 più un appuntamento futuro il controllo si ferma e i dati si cancellano. Dopo 3 errori di fila arriva un avviso
@@ -103,7 +123,7 @@ Procedura guidata: `/cerca CF CIFRE NRE [O|Z]` (messaggio cancellato subito) →
 del sito, poi chiede con i pulsanti:
 
 1. **prima visita o controllo**, solo se dalla ricetta non si capisce (senza appuntamento non c'è un'agenda con
-   cui verificarlo, come fa `/avvia`);
+   cui verificarlo, come fa `/anticipa`);
 2. **zone**: le 13 del sito (le province, con Milano città e Milano provincia separate), al massimo 4: ogni zona
    è una ricerca sul sito da 5-15 secondi;
 3. **periodo**: da subito, entro 30/60/90 giorni, entro 6 mesi, oppure scritto (`01/12/2026-31/01/2027`,
@@ -114,12 +134,17 @@ del sito, poi chiede con i pulsanti:
    fascia (estremi inclusi). Al sito si chiede mattina e/o pomeriggio secondo le fasce (il confine non è
    documentato, si chiede largo) e l'orario esatto si filtra dopo. Le ricerche salvate con la prima versione
    (una sola fascia `oraDa`/`oraA`) si leggono ancora;
-5. riepilogo e **✅ Cerca**: ricerca in tutte le zone e prime 10 date in ordine, con i pulsanti 📅 per
-   prenotare e, sotto, **🔔 Avvisami di date migliori** e **🗑 Chiudi**.
+5. **strutture**: con Avanti dopo l'orario il bot fa la ricerca in tutte le zone e mostra un pulsante per ogni
+   struttura che ha date con quei filtri (le prime 20 per data, con quante date e la prima); se ne scelgono
+   fino a 10, nessuna = tutte (`filtri.presidi`);
+6. riepilogo e **✅ Cerca**: prime 10 date in ordine nelle strutture scelte, con i pulsanti 📅 per prenotare e,
+   sotto, **🔔 Avvisami di date migliori** e **✖️ Chiudi**. Se la ricerca del passo 5 ha meno di 10 minuti vale
+   quella (una ricerca subito dopo non vedrebbe la data migliore, trattenuta dalla prima); altrimenti si rifà.
+   Nella bozza si tengono le proposte delle prime 10 date e delle prime 2 di ogni struttura.
 
 La ricerca si salva (cifrata) come controllo in modalità `cerca` **non monitorato** (`contesto.monitora: false`):
 i dati servono ai pulsanti 📅, ma **il cron non la ripete**. Senza 🔔 si cancella dopo un'ora (al primo giro del
-cron), con 🗑 subito; `/stato` la mostra come ⏸ con l'ora di cancellazione e `/date N` la rifà una volta.
+cron), con ✖️ subito; `/stato` la mostra come ⏸ con l'ora di cancellazione e `/date N` la rifà una volta.
 Solo dopo **🔔** il cron la ripete: arriva un messaggio con le prime 10 date (🆕 le nuove) quando ce n'è una mai
 mandata e, se l'elenco era già di 10, migliore dell'ultima. Le ricerche salvate prima di questa modifica (senza
 `monitora`) restano monitorate.
@@ -132,13 +157,13 @@ ricerca si ferma e i dati si cancellano.
 **Prima visita o controllo.** Il sito lo vuole sapere (`O`/`Z`). Come il sito, lo si ricava dalla ricetta
 (campo apposito, "(PRIMA VISITA)"/"(CONTROLLO)" nella descrizione, esenzione per patologia); se non basta si
 prova `O` e si verifica che le date siano nell'agenda dell'appuntamento, altrimenti `Z`. Il risultato si salva
-al primo `/avvia`. `/avvia … O` o `/avvia … Z` lo forza.
+al primo `/anticipa`. `/anticipa … O` o `/anticipa … Z` lo forza.
 
 ## Comandi
 
 | Comando | Cosa fa |
 |---|---|
-| `/avvia CODICEFISCALE CIFRE NRE [O\|Z]` | avvia un controllo. CIFRE = ultime 5 cifre della tessera sanitaria. Il messaggio si **cancella subito** (anche se sbagliato o da chi non è abilitato); il bot fa un giro e risponde con l'appuntamento trovato e, se ci sono già, le date anticipate. Un nuovo `/avvia` con lo stesso NRE sostituisce il precedente |
+| `/anticipa CODICEFISCALE CIFRE NRE [O\|Z]` | anticipa una visita prenotata (vedi sopra; `/avvia` vale ancora). CIFRE = ultime 5 cifre della tessera sanitaria. Il messaggio si **cancella subito** (anche se sbagliato o da chi non è abilitato); il bot fa un giro, mostra appuntamento, date anticipate e strutture, e parte con ✅ Avvia il controllo. Un nuovo `/anticipa` con lo stesso NRE sostituisce il precedente |
 | `/cerca CODICEFISCALE CIFRE NRE [O\|Z]` | ricerca nuova con procedura guidata a pulsanti (vedi sopra): una volta sola, monitorata solo dopo 🔔. Messaggio cancellato subito |
 | `/stato` | stato del cron (🟢/🟠/🔴) e dei propri controlli e ricerche: appuntamento o filtri, prima data, ultimo esito |
 | `/date [N]` | controlla adesso e mostra le date (anticipate, o le prime 10 della ricerca) |
@@ -148,7 +173,7 @@ al primo `/avvia`. `/avvia … O` o `/avvia … Z` lo forza.
 | `/id` | il proprio ID Telegram e quello della chat (risponde a tutti) |
 
 `N` serve solo con più controlli attivi. Il bot risponde solo agli utenti di `TELEGRAM_UTENTI` e scrive nella chat
-da cui è partito `/avvia`.
+da cui è partito `/anticipa` (o `/cerca`).
 
 ## Dati
 
@@ -163,8 +188,8 @@ Turso, tre tabelle:
   dopo un'ora (al primo giro del cron);
 - `stato`: riepilogo dell'ultimo giro del cron, per `/stato`.
 
-Codice fiscale, cifre della tessera e NRE arrivano **solo** da `/avvia`: mai variabili d'ambiente, mai nei log.
-Se si cambia `CHIAVE_CIFRATURA` i controlli salvati non si leggono più: si rifà `/avvia`.
+Codice fiscale, cifre della tessera e NRE arrivano **solo** dai comandi del bot: mai variabili d'ambiente, mai nei log.
+Se si cambia `CHIAVE_CIFRATURA` i controlli salvati non si leggono più: si rifà `/anticipa`.
 
 ## Come parla il sito
 
@@ -233,7 +258,7 @@ fa il deploy in produzione da solo.
    che Telegram rimanda a ogni messaggio; messaggi e tocchi sui pulsanti), imposta il menu dei comandi e crea le
    tabelle. Deve rispondere `"ok": true`. Va riaperto dopo un deploy che cambia i comandi o i tipi di aggiornamento.
 3. Scrivi `/id` al bot, metti il tuo ID in `TELEGRAM_UTENTI` e fai **Redeploy**.
-4. Scrivi `/avvia CODICEFISCALE CIFRE NRE` al bot.
+4. Scrivi `/anticipa CODICEFISCALE CIFRE NRE` al bot.
 5. Su cron-job.org (fuso orario Europe/Rome) due job verso `https://visit-alert.vercel.app/api/controlla`, metodo
    GET, intestazione `Authorization: Bearer <segreto>`, timeout massimo:
    - **giorno**: ogni 15 minuti (minuti 0, 15, 30, 45), ore 7–23;

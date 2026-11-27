@@ -1,5 +1,14 @@
 // Testi dei messaggi del bot (HTML di Telegram).
-import { chiaveData, fasceDi, type Appuntamento, type DataLibera, type Fascia, type Filtri, type Tipo } from "./controllo.js";
+import {
+  chiaveData,
+  fasceDi,
+  type Appuntamento,
+  type DataLibera,
+  type Fascia,
+  type Filtri,
+  type Struttura,
+  type Tipo,
+} from "./controllo.js";
 import { formatoGiorno, formatoOra } from "./dati.js";
 import { html, type Tastiera } from "./telegram.js";
 
@@ -38,8 +47,13 @@ function numero(i: number) {
 
 function riga(d: DataLibera, i: number, appuntamento: Appuntamento, nuove?: Set<string>) {
   const nuovo = nuove?.has(chiaveData(d)) ? "🆕 " : "";
-  const agenda = d.agenda.codice !== appuntamento.agenda.codice ? ` <i>(altra agenda: ${html(d.agenda.descrizione)})</i>` : "";
-  return `${numero(i)} ${nuovo}${formatoData(d.data)}${agenda}`;
+  const dove =
+    d.presidio.codice !== appuntamento.presidio.codice
+      ? ` — ${html(d.presidio.descrizione)}`
+      : d.agenda.codice !== appuntamento.agenda.codice
+        ? ` <i>(altra agenda: ${html(d.agenda.descrizione)})</i>`
+        : "";
+  return `${numero(i)} ${nuovo}${formatoData(d.data)}${dove}`;
 }
 
 /** I pulsanti "📅 N" sotto un elenco di date: toccandone uno il bot chiede conferma prima di prenotare. */
@@ -82,13 +96,14 @@ export function messaggioAnticipate(
   appuntamento: Appuntamento,
   anticipate: DataLibera[],
   nuove: Set<string>,
+  nStrutture = 1,
 ): string {
   return [
     `🎉 <b>Date libere prima del tuo appuntamento</b> (controllo #${id})`,
     "",
     descriviAppuntamento(appuntamento),
     "",
-    `Nella stessa struttura (${anticipate.length}):`,
+    `${nStrutture > 1 ? `Nelle ${nStrutture} strutture scelte` : "Nella stessa struttura"} (${anticipate.length}):`,
     elencoDate(anticipate, appuntamento, nuove),
     "",
     `Per spostarlo tocca 📅 e il numero (ti chiedo conferma), oppure <a href="${SITO}">PrenotaSalute</a> → "Sposta", o 800 638638. I posti possono sparire in fretta.`,
@@ -126,7 +141,20 @@ export function descriviFiltri(f: Filtri): string {
     `📍 Zone: ${f.zone.map((z) => html(nomeZona(z))).join(", ")}`,
     `📆 Periodo: ${periodo}`,
     `🕘 Orario: ${orario}`,
+    f.presidi && f.presidi.length > 0 ? `🏥 Strutture: ${f.presidi.map((p) => html(p.descrizione)).join(", ")}` : "🏥 Strutture: tutte",
   ].join("\n");
+}
+
+/** Quante strutture si mostrano come pulsanti (le prime per data). */
+export const MAX_STRUTTURE_MOSTRATE = 20;
+
+/** Un pulsante per struttura: "✅" se scelta, con il numero di date e la prima. */
+export function tastieraStrutture(elenco: Struttura[], scelte: string[], dato: (codice: string) => string): Tastiera {
+  return elenco.slice(0, MAX_STRUTTURE_MOSTRATE).map((s) => {
+    const nome = s.presidio.descrizione.length > 38 ? `${s.presidio.descrizione.slice(0, 37)}…` : s.presidio.descrizione;
+    const quante = s.date === 0 ? "nessuna data" : `${s.date} ${s.date === 1 ? "data" : "date"}, dal ${formatoData(s.prima).slice(4, 14)}`;
+    return [{ text: `${scelte.includes(s.presidio.codice) ? "✅" : "▫️"} ${nome} · ${quante}`, callback_data: dato(s.presidio.codice) }];
+  });
 }
 
 function rigaRisultato(d: DataLibera, i: number, nuove?: Set<string>) {
@@ -163,8 +191,8 @@ export function messaggioRisultati(
 export const AIUTO = [
   "<b>visit-alert</b>: cerco date su PrenotaSalute e ti avviso quando se ne liberano di migliori.",
   "",
-  "<code>/avvia CODICEFISCALE CIFRE NRE</code> per una ricetta già prenotata: ti avviso quando si libera una data prima del tuo appuntamento, nella stessa struttura.",
-  "<code>/cerca CODICEFISCALE CIFRE NRE</code> per cercare una visita: scegli con i pulsanti province, periodo e fascia oraria, ti mostro le prime 10 date e, solo se tocchi 🔔, ti avviso quando ne compaiono di migliori.",
+  "<code>/anticipa CODICEFISCALE CIFRE NRE</code> per una ricetta già prenotata: ti mostro le date prima del tuo appuntamento, scegli le strutture della provincia (la tua è già scelta) e con ✅ Avvia il controllo ti avviso quando se ne libera una.",
+  "<code>/cerca CODICEFISCALE CIFRE NRE</code> per cercare una visita: scegli con i pulsanti province, periodo, fascia oraria e strutture, ti mostro le prime 10 date e, solo se tocchi 🔔, ti avviso quando ne compaiono di migliori.",
   "CIFRE sono le ultime 5 cifre della tessera sanitaria, NRE il numero di ricetta elettronica. Il messaggio viene cancellato subito; i dati si salvano cifrati.",
   "Facoltativo in fondo: <code>O</code> (prima visita) o <code>Z</code> (controllo), se quello trovato in automatico è sbagliato.",
   "",

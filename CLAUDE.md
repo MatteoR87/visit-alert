@@ -11,8 +11,8 @@ Avvisi Telegram per date anticipate su PrenotaSalute (Regione Lombardia). Vedi R
   l'annullamento del vecchio appuntamento lo fa il sito da solo.
 - Disdire (`pgpcitt_annulla_appuntamento`) solo su richiesta e conferma esplicita dell'utente, un appuntamento
   alla volta (`/disdici` o 🗑 → "🗑 Sì, disdici" in `lib/disdetta-bot.ts`): mai in automatico, mai dal cron.
-- Il cron ripete un controllo o una ricerca solo se l'utente l'ha chiesto (`/avvia` o 🔔); `/cerca` e il
-  controllo dopo una prenotazione partono non monitorati.
+- Il cron ripete un controllo o una ricerca solo se l'utente l'ha chiesto (✅ Avvia il controllo dopo
+  `/anticipa`, ⏪ o 🔔): `/anticipa`, `/cerca` e il controllo dopo una prenotazione partono non monitorati.
 - Modalità prova (prenotazione e disdetta) finché `PRENOTAZIONE_REALE` non è `1`. Nelle prove di sviluppo mai
   chiamare la conferma né la disdetta.
 - Le richieste di conferma e disdetta si costruiscono con i modelli del sito (`lib/modelli-sito.ts`), non con

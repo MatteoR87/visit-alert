@@ -25,6 +25,7 @@ import {
   DURATA_RICERCA_SINGOLA_MS,
   leggiControlli,
   monitorato,
+  presidiDi,
   pulisciBozze,
   type Controllo,
   type ControlloAnticipa,
@@ -125,11 +126,18 @@ async function controllaAnticipa(c: ControlloAnticipa, ctx: Contesto): Promise<E
     );
   }
 
-  const anticipate = dateAnticipate(r.appuntamento, r.date);
+  // Le strutture scelte restano; senza scelta vale quella dell'appuntamento (anche se è cambiato).
+  const k = { ...c.contesto, appuntamento: r.appuntamento };
+  const presidi = presidiDi(k);
+  const anticipate = dateAnticipate(r.appuntamento, r.date, presidi);
   const giaNotificate = new Set(cambiato ? [] : c.contesto.notificate);
-  const nuove = new Set(anticipate.map(chiaveData).filter((k) => !giaNotificate.has(k)));
+  const nuove = new Set(anticipate.map(chiaveData).filter((x) => !giaNotificate.has(x)));
   if (nuove.size > 0)
-    await ctx.tg.manda(c.chatId, messaggioAnticipate(c.id, r.appuntamento, anticipate, nuove), tastieraPrenota(c.id, anticipate));
+    await ctx.tg.manda(
+      c.chatId,
+      messaggioAnticipate(c.id, r.appuntamento, anticipate, nuove, presidi.length),
+      tastieraPrenota(c.id, anticipate),
+    );
 
   await aggiornaControllo(ctx.db, ctx.chiave, {
     id: c.id,
@@ -137,12 +145,13 @@ async function controllaAnticipa(c: ControlloAnticipa, ctx: Contesto): Promise<E
     errori: 0,
     ultimoEsito: "ok",
     contesto: {
-      appuntamento: r.appuntamento,
+      ...k, // monitora, presidi…
       zona: r.zona,
       notificate: anticipate.map(chiaveData),
       anticipate,
-      primaData: r.date.find((d) => d.presidio.codice === r.appuntamento!.presidio.codice) ?? null,
+      primaData: r.date.find((d) => presidi.includes(d.presidio.codice)) ?? null,
       proposte: salvaProposte(r.proposte, anticipate),
+      dateZona: r.date,
     },
   });
   return nuove.size > 0 ? "notificato" : "ok";
@@ -178,7 +187,7 @@ async function controllaCerca(c: ControlloCerca, ctx: Contesto): Promise<Esito> 
         "",
         descriviAppuntamento(r.appuntamento),
         "",
-        "Ho fermato la ricerca e cancellato i dati. Se vuoi che ti avvisi quando si libera una data prima, usa /avvia.",
+        "Ho fermato la ricerca e cancellato i dati. Se vuoi che ti avvisi quando si libera una data prima, usa /anticipa.",
       ].join("\n"),
     );
     await cancellaControllo(ctx.db, c.id);

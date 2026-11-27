@@ -62,7 +62,7 @@ export async function chiediDisdetta(q: any, utenteId: string, ctx: ContestoDisd
 }
 
 /**
- * /disdici [N]: l'appuntamento di un controllo (/avvia o dopo una prenotazione).
+ * /disdici [N]: l'appuntamento di un controllo (/anticipa o dopo una prenotazione).
  * /disdici CF CIFRE NRE: legge la ricetta, salva i dati come controllo non monitorato (si cancella da solo dopo
  * un'ora) e chiede conferma.
  */

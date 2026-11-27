@@ -367,18 +367,45 @@ test("reale (anticipa): prenota, mostra il nuovo appuntamento e chiede se cercar
   assert.match(esito.testo, /Prenotato!/);
   assert.match(esito.testo, /CUP123/);
   assert.match(esito.testo, /precedente \(gio 29\/04\/2027 08:30\) è stato annullato/);
-  assert.match(esito.testo, /Tocca 🔔/);
+  assert.match(esito.testo, /Vuoi anticipare ancora\?/);
   // Il vecchio controllo è finito; il nuovo segue il nuovo appuntamento ma NON è monitorato finché non si tocca 🔔.
   const [c] = await leggiControlli(db, CHIAVE);
   assert.notEqual(c.id, id);
   assert.equal(c.modalita === "anticipa" && c.contesto.appuntamento.data, "20270410083000");
   assert.equal(c.contesto.monitora, false);
-  assert.deepEqual(esito.tastiera!.flat().map((p) => p.callback_data), [`m:${c.id}`, `d:${c.id}`, `mx:${c.id}`]);
+  assert.deepEqual(esito.tastiera!.flat().map((p) => p.callback_data), [`ap:${c.id}`, `m:${c.id}`, `d:${c.id}`, `mx:${c.id}`]);
+  assert.deepEqual(c.modalita === "anticipa" && c.contesto.presidi!.map((p) => p.codice), [PRESIDIO.codice]);
 
   await tocca(`m:${c.id}`, esito.id);
   const [dopo] = await leggiControlli(db, CHIAVE);
   assert.equal(dopo.contesto.monitora, true);
-  assert.match(tg.ultimo, /🔔 Controllo #\d+: .*prima del sab 10\/04\/2027/);
+  assert.match(tg.ultimo, /Controllo #\d+ avviato<\/b>: .*prima del sab 10\/04\/2027 08:30 nella struttura scelta/);
+});
+
+test("dopo la prenotazione, 🔎 Cerca date migliori: un giro adesso e la scelta delle strutture (senza cron)", async () => {
+  const { tg, id, tocca, db } = await ambiente({ reale: true });
+  await tocca(`p:${id}:20270410083000:${PRESIDIO.codice}`);
+  const conferma = tg.conPulsanti!;
+  await tocca(conferma.tastiera![0][0].callback_data, conferma.id);
+  const [c] = await leggiControlli(db, CHIAVE);
+  const giro = async () => ({
+    appuntamento: { ...attuale, data: "20270410083000" },
+    date: [{ ...libera, data: "20270405083000" }, { ...libera, data: "20270402083000", presidio: { codice: "ALTRO", descrizione: "ALTRO OSPEDALE" } }],
+    tipo: "O" as const,
+    zona: ZONA,
+  });
+  const { cercaMigliori } = await import("../lib/anticipa.js");
+  await cercaMigliori(
+    { id: "q", data: `ap:${c.id}`, message: { message_id: conferma.id, chat: { id: Number(UTENTE) } } },
+    UTENTE,
+    { db, chiave: CHIAVE, tg, giro },
+  );
+  const scelta = tg.conPulsanti!;
+  assert.match(scelta.testo, /1\. lun 05\/04\/2027 08:30/);
+  assert.doesNotMatch(scelta.testo, /02\/04\/2027/); // ALTRO non scelta
+  assert.ok(scelta.tastiera!.flat().some((p) => p.callback_data === `a:${c.id}:ALTRO`));
+  const [dopo] = await leggiControlli(db, CHIAVE);
+  assert.equal(dopo.contesto.monitora, false);
 });
 
 test("reale (cerca): dopo la prenotazione la ricerca finisce; ✖️ chiude anche il nuovo controllo", async () => {

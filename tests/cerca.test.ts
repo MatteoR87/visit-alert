@@ -271,6 +271,8 @@ test("/cerca: procedura completa a pulsanti e testo, salvataggio cifrato e prime
   assert.match(tg.conPulsanti!.testo, /dal 01\/12\/2026 al 31\/01\/2027/);
   assert.match(tg.conPulsanti!.testo, /Orario: 08:30–12:00, 15:00–17:00/);
 
+  await tocca("c:s:ok");
+
   await tocca("c:ok");
   assert.equal(ricerche.length, 1);
   assert.equal(ricerche[0].tipo, "Z");
@@ -309,6 +311,7 @@ test("/cerca: tipo dalla ricetta salta la domanda; periodo e orario a pulsanti; 
   await tocca("c:o:ok"); // senza fasce: tutto il giorno
   assert.match(tg.conPulsanti!.testo, /fino al 24\/12\/2026/);
   assert.match(tg.conPulsanti!.testo, /Orario: tutto il giorno/);
+  await tocca("c:s:ok");
   await tocca("c:ok");
   assert.equal(ricerche[0].filtri.al, "20261224");
   assert.deepEqual(ricerche[0].filtri.fasce, []);
@@ -338,6 +341,7 @@ test("giro della ricerca: avvisa per una data migliore, tace per una peggiore, s
   await tocca("c:z:ok");
   await tocca("c:d:0");
   await tocca("c:o:ok");
+  await tocca("c:s:ok");
   await tocca("c:ok");
   const n = tg.messaggi.length;
 
@@ -374,6 +378,7 @@ test("ricerca senza 🔔: il cron non la ripete e dopo un'ora la cancella; con �
     await tocca("c:z:ok");
     await tocca("c:d:0");
     await tocca("c:o:ok");
+    await tocca("c:s:ok");
     await tocca("c:ok");
     return tg.conPulsanti!.id;
   };
@@ -404,6 +409,38 @@ test("ricerca senza 🔔: il cron non la ripete e dopo un'ora la cancella; con �
   assert.match(tg.risposte.at(-1)!.testo ?? "", /non c'è più/i);
 });
 
+test("/cerca: dopo l'orario le strutture trovate; risultati e cron solo in quelle scelte, senza rifare la ricerca", async () => {
+  const { db, tg, scrivi, tocca, ricerche, imposta } = await ambiente({ tipo: "O" });
+  imposta({
+    appuntamento: null,
+    date: [libera("20261202090000", "P2"), libera("20261203090000"), libera("20261204090000", "P2"), libera("20261205090000", "P3")],
+    zoneInErrore: [],
+  });
+  await scrivi(`/cerca ${CF} ${CIFRE} ${NRE}`);
+  await tocca("c:z:012%");
+  await tocca("c:z:ok");
+  await tocca("c:d:0");
+  await tocca("c:o:ok");
+  assert.equal(ricerche.length, 1); // la ricerca per le strutture
+  const passo = tg.conPulsanti!;
+  assert.match(passo.testo, /In quali strutture\?.*3 strutture/s);
+  const testi = passo.tastiera!.flat().map((p) => p.text);
+  assert.equal(testi[0], "▫️ Ospedale P2 · 2 date, dal 02/12/2026"); // in ordine di prima data
+  await tocca("c:s:P2");
+  await tocca("c:s:P3");
+  await tocca("c:s:P3"); // tolta
+  assert.ok(tg.conPulsanti!.tastiera!.flat().some((p) => p.text.startsWith("✅ Ospedale P2")));
+  await tocca("c:s:ok");
+  assert.match(tg.conPulsanti!.testo, /Strutture: Ospedale P2/);
+  await tocca("c:ok");
+  assert.equal(ricerche.length, 1); // risultato dalla ricerca di prima
+  assert.match(tg.ultimo, /02\/12\/2026.*04\/12\/2026/s);
+  assert.doesNotMatch(tg.ultimo, /03\/12\/2026|05\/12\/2026/);
+
+  const [c] = await leggiControlli(db, CHIAVE);
+  assert.deepEqual(c.modalita === "cerca" && c.contesto.filtri.presidi!.map((p) => p.codice), ["P2"]);
+});
+
 test("/stato e /stop mostrano anche le ricerche", async () => {
   const { tg, scrivi, tocca } = await ambiente({ tipo: "O" });
   await scrivi(`/cerca ${CF} ${CIFRE} ${NRE}`);
@@ -411,6 +448,7 @@ test("/stato e /stop mostrano anche le ricerche", async () => {
   await tocca("c:z:ok");
   await tocca("c:d:0");
   await tocca("c:o:ok");
+  await tocca("c:s:ok");
   await tocca("c:ok");
   await scrivi("/stato");
   assert.match(tg.ultimo, /<b>#1<\/b> 🔎 Ricerca: VISITA CARDIOLOGICA/);

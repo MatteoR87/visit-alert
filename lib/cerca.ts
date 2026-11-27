@@ -10,14 +10,30 @@ import {
   chiaveData,
   ErroreUtente,
   oggiRoma,
+  proposteDi,
+  rispettaFiltri,
+  strutture,
+  type DataLibera,
   type DatiRicetta,
+  type EsitoRicerca,
   type Fascia,
   type Filtri,
+  type Luogo,
+  type Proposte,
   type Tipo,
   type Zona,
 } from "./controllo.js";
 import { leggiDatiRicetta, leggiFasce, leggiPeriodo, ordinaFasce, piuGiorni } from "./dati.js";
-import { aggiornaControllo, cancellaBozza, cancellaControllo, leggiBozza, leggiControlli, nuovoControllo, scriviBozza } from "./db.js";
+import {
+  aggiornaControllo,
+  cancellaBozza,
+  cancellaControllo,
+  leggiBozza,
+  leggiControlli,
+  nuovoControllo,
+  presidiDi,
+  scriviBozza,
+} from "./db.js";
 import {
   descriviFascia,
   descriviFasce,
@@ -26,9 +42,11 @@ import {
   formatoTipo,
   messaggioRisultati,
   nomeZona,
+  MAX_STRUTTURE_MOSTRATE,
   NON_MONITORATA,
   PRIMI_RISULTATI,
   tastieraRicerca,
+  tastieraStrutture,
 } from "./messaggi.js";
 import { salvaProposte, type AnteprimaSito, type CercaSito } from "./monitor.js";
 import { InCoda } from "./prenota.js";
@@ -62,7 +80,12 @@ export type ContestoCerca = {
   ora?: () => Date;
 };
 
-type Passo = "tipo" | "zone" | "periodo" | "orario" | "conferma";
+type Passo = "tipo" | "zone" | "periodo" | "orario" | "strutture" | "conferma";
+
+/** Quante strutture si possono scegliere. */
+export const MAX_STRUTTURE = 10;
+/** Per quanto la ricerca fatta per scegliere le strutture vale anche come risultato (poi si rifà). */
+const DURATA_ANTEPRIMA_MS = 10 * 60_000;
 
 export type Bozza = {
   dati: DatiRicetta;
@@ -77,6 +100,13 @@ export type Bozza = {
   al: string | null;
   /** Vuota = tutto il giorno. */
   fasce: Fascia[];
+  /** Le strutture scelte; vuota = tutte. */
+  presidi?: Luogo[];
+  /**
+   * La ricerca fatta dopo l'orario per mostrare le strutture: con ✅ Cerca, se è recente, vale come risultato
+   * (una ricerca subito dopo non vedrebbe la data migliore, trattenuta da questa).
+   */
+  anteprima?: { quando: string; esito: EsitoRicerca };
   passo: Passo;
   /** Il messaggio con i pulsanti del passo corrente. */
   messaggio: number;
@@ -97,7 +127,20 @@ function filtriDi(b: Bozza): Filtri {
     dal: b.dal,
     al: b.al,
     fasce: ordinaFasce(b.fasce ?? []),
+    presidi: b.presidi ?? [],
   };
+}
+
+/** Le proposte da tenere nella bozza: le prime 10 date e le prime 2 di ogni struttura (le altre pesano e basta). */
+function proposteCompatte(esito: EsitoRicerca): Proposte {
+  const tenute: DataLibera[] = esito.date.slice(0, PRIMI_RISULTATI);
+  const perStruttura = new Map<string, number>();
+  for (const d of esito.date) {
+    const n = perStruttura.get(d.presidio.codice) ?? 0;
+    if (n < 2) tenute.push(d);
+    perStruttura.set(d.presidio.codice, n + 1);
+  }
+  return proposteDi(esito.proposte ?? {}, tenute);
 }
 
 function intestazione(b: Bozza) {
@@ -178,6 +221,18 @@ export function schermata(b: Bozza): { testo: string; tastiera: Tastiera } {
           .join("\n"),
         tastiera: righe,
       };
+    }
+    case "strutture": {
+      const elenco = strutture(b.anteprima?.esito.date ?? []);
+      const scelte = (b.presidi ?? []).map((p) => p.codice);
+      const righe: Tastiera = tastieraStrutture(elenco, scelte, (codice) => `c:s:${codice}`);
+      righe.push([{ text: scelte.length === 0 ? "Tutte ▶" : `Avanti ▶ (${scelte.length})`, callback_data: "c:s:ok" }]);
+      righe.push(scelte.length > 0 ? [{ text: "🔄 Tutte", callback_data: "c:s:tutte" }, annulla] : [annulla]);
+      const testo =
+        elenco.length === 0
+          ? "🏥 Con questi filtri per ora <b>non c'è nessuna data</b>. Avanti: la ricerca vale per tutte le strutture e con 🔔 ti avviso quando compare una data."
+          : `🏥 <b>In quali strutture?</b> Ho trovato date in ${elenco.length} ${elenco.length === 1 ? "struttura" : "strutture"}${elenco.length > MAX_STRUTTURE_MOSTRATE ? ` (qui le prime ${MAX_STRUTTURE_MOSTRATE} per data)` : ""}. Toccane una o più (al massimo ${MAX_STRUTTURE}), poi Avanti; nessuna = tutte.`;
+      return { testo: `${intestazione(b)}\n\n${descriviFiltri({ ...filtriDi(b), presidi: [] }).split("\n").slice(0, 3).join("\n")}\n\n${testo}`, tastiera: righe };
     }
     case "conferma":
       return {
@@ -284,7 +339,19 @@ export async function gestisciPulsante(q: any, utenteId: string, ctx: ContestoCe
     b.fasce ??= [];
     if (valore === "ok") {
       b.fasce = ordinaFasce(b.fasce);
-      b.passo = "conferma";
+      // Una ricerca per sapere quali strutture hanno date con questi filtri.
+      await ctx.tg.rispondiPulsante(q.id);
+      await ctx.tg.modifica(chatId, messaggio, `${intestazione(b)}\n\n⏳ Cerco le date per mostrarti le strutture (qualche secondo per zona)…`);
+      try {
+        const esito = await (ctx.cerca ?? cercaNuova)(b.dati, b.tipo ?? "O", { ...filtriDi(b), presidi: [] });
+        b.anteprima = { quando: (ctx.ora?.() ?? new Date()).toISOString(), esito: { ...esito, proposte: proposteCompatte(esito) } };
+        b.presidi = [];
+        b.passo = "strutture";
+      } catch (e) {
+        await ctx.tg.manda(chatId, `❌ ${html(erroreSito(e))}`);
+      }
+      await salvaEMostra(b, utenteId, chatId, ctx, false);
+      return;
     } else if (valore === "tutto") {
       b.fasce = [];
     } else {
@@ -299,6 +366,19 @@ export async function gestisciPulsante(q: any, utenteId: string, ctx: ContestoCe
         await ctx.tg.rispondiPulsante(q.id, `Al massimo ${MAX_FASCE} fasce`);
         return;
       } else b.fasce.push(x);
+    }
+  } else if (azione === "s" && b.passo === "strutture") {
+    const elenco = strutture(b.anteprima?.esito.date ?? []);
+    b.presidi ??= [];
+    if (valore === "ok") b.passo = "conferma";
+    else if (valore === "tutte") b.presidi = [];
+    else if (b.presidi.some((p) => p.codice === valore)) b.presidi = b.presidi.filter((p) => p.codice !== valore);
+    else if (b.presidi.length >= MAX_STRUTTURE) {
+      await ctx.tg.rispondiPulsante(q.id, `Al massimo ${MAX_STRUTTURE} strutture`);
+      return;
+    } else {
+      const s = elenco.find((x) => x.presidio.codice === valore);
+      if (s) b.presidi.push(s.presidio);
     }
   } else if (azione === "ok" && b.passo === "conferma") {
     await ctx.tg.rispondiPulsante(q.id);
@@ -347,9 +427,15 @@ async function avvia(b: Bozza, utenteId: string, chatId: string, ctx: ContestoCe
   const filtri = filtriDi(b);
   const tipo = b.tipo ?? "O";
   await ctx.tg.modifica(chatId, b.messaggio, `${intestazione(b)}\n\n${descriviFiltri(filtri)}\n\n⏳ Cerco in ${filtri.zone.length} ${filtri.zone.length === 1 ? "zona" : "zone"} (qualche secondo per zona)…`);
-  let r;
+  let r: EsitoRicerca;
   try {
-    r = await (ctx.cerca ?? cercaNuova)(b.dati, tipo, filtri);
+    // La ricerca fatta per le strutture, se recente, vale come risultato (filtrata per le strutture scelte).
+    const a = b.anteprima;
+    const adesso = ctx.ora?.() ?? new Date();
+    r =
+      a && adesso.getTime() - Date.parse(a.quando) < DURATA_ANTEPRIMA_MS
+        ? { ...a.esito, date: a.esito.date.filter((d) => rispettaFiltri(d, filtri, oggi(ctx))) }
+        : await (ctx.cerca ?? cercaNuova)(b.dati, tipo, filtri);
   } catch (e) {
     // La bozza resta: si può riprovare con lo stesso pulsante.
     await ctx.tg.manda(chatId, `❌ ${html(erroreSito(e))}`);
@@ -370,7 +456,7 @@ async function avvia(b: Bozza, utenteId: string, chatId: string, ctx: ContestoCe
       risultati: primi,
       notificate: primi.map(chiaveData),
       proposte: salvaProposte(r.proposte, primi),
-      // Il cron la ripete solo dopo il tocco su 🔔 (attivaMonitoraggio).
+      // Il cron la ripete solo dopo il tocco su 🔔 (gestisciMonitoraggio).
       monitora: false,
     },
   });
@@ -392,9 +478,9 @@ export async function gestisciMonitoraggio(q: any, utenteId: string, ctx: Contes
   const chatId = String(q.message?.chat?.id ?? "");
   const messaggio = Number(q.message?.message_id ?? 0);
   const c = (await leggiControlli(ctx.db, ctx.chiave, utenteId)).find((x) => x.id === Number(n));
-  // Tolti 🔔/🗑, restano i 📅 (servono finché la ricerca esiste).
+  // Tolti 🔔/✅/✖️, le strutture e gli altri pulsanti di scelta, restano i 📅 (servono finché il controllo esiste).
   const senzaRiga = ((q.message?.reply_markup?.inline_keyboard ?? []) as Tastiera).filter(
-    (riga) => !riga.some((p) => /^mx?:/.test(String(p.callback_data ?? ""))),
+    (riga) => !riga.some((p) => /^(mx?|a|ap|d):/.test(String(p.callback_data ?? ""))),
   );
   if (!c) {
     await ctx.tg.rispondiPulsante(q.id, "Non c'è più (dati già cancellati)");
@@ -415,7 +501,11 @@ export async function gestisciMonitoraggio(q: any, utenteId: string, ctx: Contes
       tipo: c.tipo,
       errori: c.errori,
       ultimoEsito: c.ultimoEsito,
-      contesto: { ...c.contesto, monitora: true },
+      // Le date già mostrate non si rimandano al primo giro.
+      contesto:
+        c.modalita === "anticipa"
+          ? { ...c.contesto, monitora: true, notificate: c.contesto.anticipate.map(chiaveData) }
+          : { ...c.contesto, monitora: true },
     });
   }
   await ctx.tg.rispondiPulsante(q.id, "Monitoraggio attivo");
@@ -424,6 +514,6 @@ export async function gestisciMonitoraggio(q: any, utenteId: string, ctx: Contes
     chatId,
     c.modalita === "cerca"
       ? `🔔 Ricerca #${c.id}: la ripeto ogni 15 minuti di giorno (ogni ora di notte) e ti avviso quando compaiono date migliori. /stop ${c.id} per fermarla.`
-      : `🔔 Controllo #${c.id}: ogni 15 minuti di giorno (ogni ora di notte) guardo se si libera una data prima del ${formatoData(c.contesto.appuntamento.data)}, nella stessa struttura, e ti avviso. /stop ${c.id} per fermarlo.`,
+      : `✅ <b>Controllo #${c.id} avviato</b>: ogni 15 minuti di giorno (ogni ora di notte) guardo se si libera una data prima del ${formatoData(c.contesto.appuntamento.data)} ${presidiDi(c.contesto).length > 1 ? `nelle ${presidiDi(c.contesto).length} strutture scelte` : "nella struttura scelta"} e ti avviso. /stop ${c.id} per fermarlo.`,
   );
 }

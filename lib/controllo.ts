@@ -44,6 +44,8 @@ export type Filtri = {
   /** Prima versione (una sola fascia): si legge ancora con fasceDi. */
   oraDa?: number;
   oraA?: number;
+  /** Le strutture accettate; assente o vuota = tutte. */
+  presidi?: Luogo[];
 };
 
 export const GIORNO_INTERO: Fascia = { da: 0, a: 24 * 60 };
@@ -415,9 +417,31 @@ export async function giroSito(dati: DatiRicetta, opz: OpzioniGiro = {}): Promis
   });
 }
 
-/** Le date libere prima dell'appuntamento, nello stesso presidio. */
-export function dateAnticipate(appuntamento: Appuntamento, date: DataLibera[]): DataLibera[] {
-  return date.filter((d) => d.presidio.codice === appuntamento.presidio.codice && d.data < appuntamento.data);
+/**
+ * Le date libere prima dell'appuntamento, nelle strutture scelte (codici presidio); senza scelta, nello
+ * stesso presidio dell'appuntamento.
+ */
+export function dateAnticipate(appuntamento: Appuntamento, date: DataLibera[], presidi?: string[] | null): DataLibera[] {
+  const ammessi = new Set(presidi && presidi.length > 0 ? presidi : [appuntamento.presidio.codice]);
+  return date.filter((d) => ammessi.has(d.presidio.codice) && d.data < appuntamento.data);
+}
+
+/** Una struttura tra le date trovate: quante date ha e la prima. */
+export type Struttura = { presidio: Luogo; date: number; prima: string };
+
+/** Le strutture delle date, ordinate per prima data; `sempre` (es. quella dell'appuntamento) c'è anche senza date. */
+export function strutture(date: DataLibera[], sempre: Luogo[] = []): Struttura[] {
+  const m = new Map<string, Struttura>();
+  for (const d of date) {
+    const s = m.get(d.presidio.codice);
+    if (s) {
+      s.date++;
+      if (d.data < s.prima) s.prima = d.data;
+    } else m.set(d.presidio.codice, { presidio: d.presidio, date: 1, prima: d.data });
+  }
+  const fuori = [...m.values()].sort((a, b) => a.prima.localeCompare(b.prima));
+  for (const p of sempre) if (!m.has(p.codice)) fuori.push({ presidio: p, date: 0, prima: "" });
+  return fuori;
 }
 
 // ---- ricerca nuova -------------------------------------------------------------------------------
@@ -445,6 +469,7 @@ export function rispettaFiltri(d: DataLibera, f: Filtri, oggi: string): boolean 
   if (giorno < oggi) return false;
   if (f.dal && giorno < f.dal) return false;
   if (f.al && giorno > f.al) return false;
+  if (f.presidi && f.presidi.length > 0 && !f.presidi.some((p) => p.codice === d.presidio.codice)) return false;
   const fasce = fasceDi(f);
   if (fasce.length === 0) return true;
   const m = minuti(d.data);
